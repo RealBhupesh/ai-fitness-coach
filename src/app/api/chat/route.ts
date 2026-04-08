@@ -1,0 +1,94 @@
+import { desc, eq } from "drizzle-orm";
+import { nanoid } from "nanoid";
+import { NextResponse } from "next/server";
+import { db } from "@/db";
+import { chatMessages, chatSessions } from "@/db/schema";
+import { requireServerSession } from "@/lib/auth/session";
+import { generateCoachMessage } from "@/lib/ai/coach";
+import { chatInputSchema } from "@/lib/validation/schemas";
+import { ensureChatSession, getAppProfile } from "@/lib/server/app-data";
+import { toJson } from "@/lib/utils/json";
+
+export async function GET(request: Request) {
+  try {
+    const session = await requireServerSession(request);
+    const messages = await db.query.chatMessages.findMany({
+      where: eq(chatMessages.userId, session.user.id),
+      orderBy: [desc(chatMessages.createdAt)],
+      limit: 50,
+    });
+
+    return NextResponse.json({ messages: messages.reverse() });
+  } catch {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const session = await requireServerSession(request);
+    const parsed = chatInputSchema.safeParse(await request.json());
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid chat payload", details: parsed.error.flatten() }, { status: 400 });
+    }
+
+    const currentChatSession = await ensureChatSession(session.user.id);
+    const [profile, recentMessages] = await Promise.all([
+      getAppProfile(session.user.id),
+      db.query.chatMessages.findMany({
+        where: eq(chatMessages.userId, session.user.id),
+        orderBy: [desc(chatMessages.createdAt)],
+        limit: 10,
+      }),
+    ]);
+
+    const generated = await generateCoachMessage({
+      profile,
+      recentMessages: recentMessages.reverse().map((message) => ({
+        role: message.role as "system" | "user" | "assistant",
+        content: message.content,
+      })),
+      userMessage: parsed.data.message,
+    });
+
+    await db.insert(chatMessages).values([
+      {
+        id: nanoid(),
+        userId: session.user.id,
+        sessionId: currentChatSession.id,
+        role: "user",
+        content: parsed.data.message,
+        createdAt: new Date(),
+      },
+      {
+        id: nanoid(),
+        userId: session.user.id,
+        sessionId: currentChatSession.id,
+        role: "assistant",
+        content: generated.message,
+        metadata: toJson({
+          provider: generated.provider,
+          model: generated.model,
+          tokens: generated.tokens,
+        }),
+        createdAt: new Date(),
+      },
+    ]);
+
+    await db
+      .update(chatSessions)
+      .set({
+        lastMessageAt: new Date(),
+      })
+      .where(eq(chatSessions.id, currentChatSession.id));
+
+    return NextResponse.json({
+      message: generated.message,
+      tokens: generated.tokens,
+      provider: generated.provider,
+    });
+  } catch (error) {
+    const status = error instanceof Error && error.message === "UNAUTHORIZED" ? 401 : 500;
+    return NextResponse.json({ error: status === 401 ? "Unauthorized" : "Failed to process chat request" }, { status });
+  }
+}
