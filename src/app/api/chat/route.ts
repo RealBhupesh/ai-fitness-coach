@@ -7,6 +7,7 @@ import { requireServerSession } from "@/lib/auth/session";
 import { generateCoachMessage } from "@/lib/ai/coach";
 import { chatInputSchema } from "@/lib/validation/schemas";
 import { ensureChatSession, getAppProfile } from "@/lib/server/app-data";
+import { guardMutationRequest, getRequestIp } from "@/lib/security/request-guard";
 import { toJson } from "@/lib/utils/json";
 
 export async function GET(request: Request) {
@@ -27,6 +28,16 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const session = await requireServerSession(request);
+    const guard = guardMutationRequest(request, {
+      bucket: "chat",
+      key: `${session.user.id}:${getRequestIp(request)}`,
+      limit: 24,
+      windowMs: 60_000,
+    });
+    if (guard) {
+      return guard;
+    }
+
     const parsed = chatInputSchema.safeParse(await request.json());
     if (!parsed.success) {
       return NextResponse.json({ error: "Invalid chat payload", details: parsed.error.flatten() }, { status: 400 });
@@ -48,6 +59,8 @@ export async function POST(request: Request) {
         role: message.role as "system" | "user" | "assistant",
         content: message.content,
       })),
+      sessionSummary: currentChatSession.summary ?? undefined,
+      sessionContext: currentChatSession.context ?? undefined,
       userMessage: parsed.data.message,
     });
 
@@ -79,6 +92,14 @@ export async function POST(request: Request) {
       .update(chatSessions)
       .set({
         lastMessageAt: new Date(),
+        summary: `Goal: ${profile?.goals[0] ?? "general fitness"}. Latest user request: ${parsed.data.message.slice(0, 220)}. Latest coach reply: ${generated.message.slice(0, 220)}.`,
+        context: toJson({
+          lastUserMessage: parsed.data.message,
+          lastAssistantMessage: generated.message,
+          focusGoal: profile?.goals[0] ?? null,
+          coachingTone: profile?.coachingTone ?? null,
+          updatedAt: new Date().toISOString(),
+        }),
       })
       .where(eq(chatSessions.id, currentChatSession.id));
 

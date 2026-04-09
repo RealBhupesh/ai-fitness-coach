@@ -4,7 +4,6 @@ import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signIn, useSession } from "@/lib/auth/client";
-import { createDummySession, getDummySession } from "@/lib/dummy-auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -21,16 +20,10 @@ function LoginPageInner() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (!isPending && (sessionData?.user?.id || getDummySession()?.id)) {
+    if (!isPending && sessionData?.user?.id) {
       router.replace(searchParams.get("next") || "/dashboard");
     }
   }, [isPending, router, searchParams, sessionData?.user?.id]);
-
-  const handleDemoLogin = () => {
-    createDummySession("Demo Athlete");
-    router.push(searchParams.get("next") || "/dashboard");
-    router.refresh();
-  };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -82,14 +75,6 @@ function LoginPageInner() {
             {error ? <p className="text-sm text-rose-400">{error}</p> : null}
             <Button className="w-full bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600" disabled={submitting}>
               {submitting ? "Signing in..." : "Sign in"}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full"
-              onClick={handleDemoLogin}
-            >
-              Continue with demo account
             </Button>
           </form>
           <p className="mt-4 text-sm text-zinc-400">

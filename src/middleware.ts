@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { DUMMY_AUTH_COOKIE } from "@/lib/dummy-auth";
 
 const protectedPrefixes = [
   "/dashboard",
@@ -14,7 +13,7 @@ const protectedPrefixes = [
   "/onboarding",
 ];
 
-const SESSION_COOKIE_NAMES = ["better-auth.session_token", "__Secure-better-auth.session_token", DUMMY_AUTH_COOKIE];
+const SESSION_COOKIE_NAMES = ["better-auth.session_token", "__Secure-better-auth.session_token"];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;

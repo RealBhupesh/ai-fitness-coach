@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { exerciseReps, sessionFeedbackEvents, workoutExercises, workoutSessions } from "@/db/schema";
 import { requireServerSession } from "@/lib/auth/session";
+import { guardMutationRequest, getRequestIp } from "@/lib/security/request-guard";
 import { workoutSessionInputSchema } from "@/lib/validation/schemas";
 import { toJson } from "@/lib/utils/json";
 
@@ -24,6 +25,17 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    const session = await requireServerSession(request);
+    const guard = guardMutationRequest(request, {
+      bucket: "workouts",
+      key: `${session.user.id}:${getRequestIp(request)}`,
+      limit: 20,
+      windowMs: 60_000,
+    });
+    if (guard) {
+      return guard;
+    }
+
     const parsed = workoutSessionInputSchema.safeParse(await request.json());
     if (!parsed.success) {
       return NextResponse.json({ error: "Invalid workout payload", details: parsed.error.flatten() }, { status: 400 });
@@ -31,26 +43,10 @@ export async function POST(request: Request) {
 
     const data = parsed.data;
     const sessionId = nanoid();
-    let sessionUserId: string | null = null;
-    try {
-      const session = await requireServerSession(request);
-      sessionUserId = session.user.id;
-    } catch {
-      sessionUserId = null;
-    }
-
-    // Demo mode: accept session payload without DB persistence.
-    if (!sessionUserId) {
-      return NextResponse.json({
-        message: "Workout captured in demo mode",
-        sessionId,
-        demoMode: true,
-      });
-    }
 
     await db.insert(workoutSessions).values({
       id: sessionId,
-      userId: sessionUserId,
+      userId: session.user.id,
       type: data.type,
       exerciseType: data.exerciseType,
       date: new Date(),
@@ -127,6 +123,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ message: "Workout created successfully", sessionId });
   } catch (error) {
-    return NextResponse.json({ error: "Failed to create workout" }, { status: 500 });
+    const status = error instanceof Error && error.message === "UNAUTHORIZED" ? 401 : 500;
+    return NextResponse.json({ error: status === 401 ? "Unauthorized" : "Failed to create workout" }, { status });
   }
 }

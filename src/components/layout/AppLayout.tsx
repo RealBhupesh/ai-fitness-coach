@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "@/lib/auth/client";
-import { clearDummySession } from "@/lib/dummy-auth";
 import { useUserProfile } from "@/hooks/useUserProfile";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -106,12 +105,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   };
 
   const handleLogout = async () => {
-    clearDummySession();
-    try {
-      await signOut();
-    } catch {
-      // Ignore in demo mode where backend auth is not configured.
-    }
+    await signOut();
     router.push("/");
     router.refresh();
   };

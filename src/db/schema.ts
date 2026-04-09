@@ -1,56 +1,48 @@
-import { sql } from "drizzle-orm";
-import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { boolean, integer, pgTable, real, text, timestamp } from "drizzle-orm/pg-core";
 
-export const users = sqliteTable("users", {
+const createdAt = () => timestamp("created_at", { mode: "date" }).defaultNow().notNull();
+const updatedAt = () => timestamp("updated_at", { mode: "date" }).defaultNow().notNull();
+
+export const users = pgTable("users", {
   id: text("id").primaryKey(),
   email: text("email").notNull().unique(),
   name: text("name").notNull(),
-  emailVerified: integer("email_verified", { mode: "boolean" }).default(false),
+  emailVerified: boolean("email_verified").default(false),
   image: text("image"),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`CURRENT_TIMESTAMP`),
-  updatedAt: integer("updated_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`CURRENT_TIMESTAMP`),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
 });
 
-export const sessions = sqliteTable("sessions", {
+export const sessions = pgTable("sessions", {
   id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  expiresAt: timestamp("expires_at", { mode: "date" }).notNull(),
+  token: text("token").notNull().unique(),
   ipAddress: text("ip_address"),
   userAgent: text("user_agent"),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`CURRENT_TIMESTAMP`),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
 });
 
-export const accounts = sqliteTable("accounts", {
+export const accounts = pgTable("accounts", {
   id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   accountId: text("account_id").notNull(),
   providerId: text("provider_id").notNull(),
   accessToken: text("access_token"),
   refreshToken: text("refresh_token"),
   idToken: text("id_token"),
-  expiresAt: integer("expires_at", { mode: "timestamp" }),
+  accessTokenExpiresAt: timestamp("access_token_expires_at", { mode: "date" }),
+  refreshTokenExpiresAt: timestamp("refresh_token_expires_at", { mode: "date" }),
+  scope: text("scope"),
   password: text("password"),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`CURRENT_TIMESTAMP`),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
 });
 
-export const userProfiles = sqliteTable("user_profiles", {
+export const userProfiles = pgTable("user_profiles", {
   id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" })
-    .unique(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }).unique(),
   age: integer("age"),
   gender: text("gender"),
   height: real("height"),
@@ -73,16 +65,12 @@ export const userProfiles = sqliteTable("user_profiles", {
   budgetTier: text("budget_tier"),
   cuisinePreference: text("cuisine_preference"),
   coachingTone: text("coaching_tone"),
-  onboardingCompleted: integer("onboarding_completed", { mode: "boolean" }).default(false),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`CURRENT_TIMESTAMP`),
-  updatedAt: integer("updated_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`CURRENT_TIMESTAMP`),
+  onboardingCompleted: boolean("onboarding_completed").default(false),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
 });
 
-export const exercises = sqliteTable("exercises", {
+export const exercises = pgTable("exercises", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   category: text("category").notNull(),
@@ -97,13 +85,11 @@ export const exercises = sqliteTable("exercises", {
   formPoints: text("form_points"),
   commonMistakes: text("common_mistakes"),
   modifications: text("modifications"),
-  isActive: integer("is_active", { mode: "boolean" }).default(true),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`CURRENT_TIMESTAMP`),
+  isActive: boolean("is_active").default(true),
+  createdAt: createdAt(),
 });
 
-export const danceStyles = sqliteTable("dance_styles", {
+export const danceStyles = pgTable("dance_styles", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   description: text("description").notNull(),
@@ -114,33 +100,25 @@ export const danceStyles = sqliteTable("dance_styles", {
   benefits: text("benefits"),
   imageUrl: text("image_url"),
   videoUrl: text("video_url"),
-  isActive: integer("is_active", { mode: "boolean" }).default(true),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`CURRENT_TIMESTAMP`),
+  isActive: boolean("is_active").default(true),
+  createdAt: createdAt(),
 });
 
-export const danceRoutines = sqliteTable("dance_routines", {
+export const danceRoutines = pgTable("dance_routines", {
   id: text("id").primaryKey(),
-  danceStyleId: text("dance_style_id")
-    .notNull()
-    .references(() => danceStyles.id, { onDelete: "cascade" }),
+  danceStyleId: text("dance_style_id").notNull().references(() => danceStyles.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   durationMs: integer("duration_ms").notNull(),
   checkpoints: text("checkpoints").notNull(),
   difficulty: text("difficulty").notNull(),
   musicUrl: text("music_url"),
   thumbnailUrl: text("thumbnail_url"),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`CURRENT_TIMESTAMP`),
+  createdAt: createdAt(),
 });
 
-export const workoutPlans = sqliteTable("workout_plans", {
+export const workoutPlans = pgTable("workout_plans", {
   id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   description: text("description"),
   goal: text("goal").notNull(),
@@ -150,53 +128,44 @@ export const workoutPlans = sqliteTable("workout_plans", {
   weeklySchedule: text("weekly_schedule"),
   progressionRules: text("progression_rules"),
   regressionRules: text("regression_rules"),
-  isActive: integer("is_active", { mode: "boolean" }).default(true),
-  isAiGenerated: integer("is_ai_generated", { mode: "boolean" }).default(false),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`CURRENT_TIMESTAMP`),
+  isActive: boolean("is_active").default(true),
+  isAiGenerated: boolean("is_ai_generated").default(false),
+  createdAt: createdAt(),
 });
 
-export const workoutSessions = sqliteTable("workout_sessions", {
+export const workoutSessions = pgTable("workout_sessions", {
   id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   planId: text("plan_id").references(() => workoutPlans.id, { onDelete: "set null" }),
   type: text("type").notNull(),
   exerciseType: text("exercise_type"),
-  date: integer("date", { mode: "timestamp" }).notNull(),
+  date: timestamp("date", { mode: "date" }).notNull(),
   duration: integer("duration"),
   caloriesBurned: integer("calories_burned"),
   notes: text("notes"),
   rating: integer("rating"),
   mood: text("mood"),
-  completed: integer("completed", { mode: "boolean" }).default(false),
+  completed: boolean("completed").default(false),
   compositeScore: integer("composite_score"),
   scoringBreakdown: text("scoring_breakdown"),
   summary: text("summary"),
+  summaryPayload: text("summary_payload"),
   totalReps: integer("total_reps"),
   avgRepDurationMs: integer("avg_rep_duration_ms"),
   fatigueCurve: text("fatigue_curve"),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`CURRENT_TIMESTAMP`),
+  createdAt: createdAt(),
 });
 
-export const workoutExercises = sqliteTable("workout_exercises", {
+export const workoutExercises = pgTable("workout_exercises", {
   id: text("id").primaryKey(),
-  sessionId: text("session_id")
-    .notNull()
-    .references(() => workoutSessions.id, { onDelete: "cascade" }),
-  exerciseId: text("exercise_id")
-    .notNull()
-    .references(() => exercises.id, { onDelete: "cascade" }),
+  sessionId: text("session_id").notNull().references(() => workoutSessions.id, { onDelete: "cascade" }),
+  exerciseId: text("exercise_id").notNull().references(() => exercises.id, { onDelete: "cascade" }),
   sets: integer("sets"),
   reps: integer("reps"),
   weight: real("weight"),
   duration: integer("duration"),
   distance: real("distance"),
-  completed: integer("completed", { mode: "boolean" }).default(false),
+  completed: boolean("completed").default(false),
   formScore: integer("form_score"),
   romScore: integer("rom_score"),
   tempoScore: integer("tempo_score"),
@@ -209,14 +178,10 @@ export const workoutExercises = sqliteTable("workout_exercises", {
   order: integer("order").notNull(),
 });
 
-export const exerciseReps = sqliteTable("exercise_reps", {
+export const exerciseReps = pgTable("exercise_reps", {
   id: text("id").primaryKey(),
-  sessionId: text("session_id")
-    .notNull()
-    .references(() => workoutSessions.id, { onDelete: "cascade" }),
-  exerciseId: text("exercise_id")
-    .notNull()
-    .references(() => exercises.id, { onDelete: "cascade" }),
+  sessionId: text("session_id").notNull().references(() => workoutSessions.id, { onDelete: "cascade" }),
+  exerciseId: text("exercise_id").notNull().references(() => exercises.id, { onDelete: "cascade" }),
   repNumber: integer("rep_number").notNull(),
   phase: text("phase").notNull(),
   formScore: integer("form_score"),
@@ -226,32 +191,24 @@ export const exerciseReps = sqliteTable("exercise_reps", {
   corrections: text("corrections"),
   durationMs: integer("duration_ms"),
   timestamps: text("timestamps"),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`CURRENT_TIMESTAMP`),
+  createdAt: createdAt(),
 });
 
-export const sessionFeedbackEvents = sqliteTable("session_feedback_events", {
+export const sessionFeedbackEvents = pgTable("session_feedback_events", {
   id: text("id").primaryKey(),
-  sessionId: text("session_id")
-    .notNull()
-    .references(() => workoutSessions.id, { onDelete: "cascade" }),
+  sessionId: text("session_id").notNull().references(() => workoutSessions.id, { onDelete: "cascade" }),
   timestamp: integer("timestamp").notNull(),
   type: text("type").notNull(),
   message: text("message").notNull(),
   severity: text("severity").notNull(),
   source: text("source").notNull(),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`CURRENT_TIMESTAMP`),
+  createdAt: createdAt(),
 });
 
-export const progressTracking = sqliteTable("progress_tracking", {
+export const progressTracking = pgTable("progress_tracking", {
   id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  date: integer("date", { mode: "timestamp" }).notNull(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  date: timestamp("date", { mode: "date" }).notNull(),
   weight: real("weight"),
   bodyFat: real("body_fat"),
   muscleMass: real("muscle_mass"),
@@ -260,12 +217,10 @@ export const progressTracking = sqliteTable("progress_tracking", {
   adherence: integer("adherence"),
   photos: text("photos"),
   notes: text("notes"),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`CURRENT_TIMESTAMP`),
+  createdAt: createdAt(),
 });
 
-export const achievements = sqliteTable("achievements", {
+export const achievements = pgTable("achievements", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   description: text("description").notNull(),
@@ -273,30 +228,20 @@ export const achievements = sqliteTable("achievements", {
   icon: text("icon"),
   threshold: integer("threshold"),
   points: integer("points").default(0),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`CURRENT_TIMESTAMP`),
+  createdAt: createdAt(),
 });
 
-export const userAchievements = sqliteTable("user_achievements", {
+export const userAchievements = pgTable("user_achievements", {
   id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  achievementId: text("achievement_id")
-    .notNull()
-    .references(() => achievements.id, { onDelete: "cascade" }),
-  unlockedAt: integer("unlocked_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`CURRENT_TIMESTAMP`),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  achievementId: text("achievement_id").notNull().references(() => achievements.id, { onDelete: "cascade" }),
+  unlockedAt: timestamp("unlocked_at", { mode: "date" }).defaultNow().notNull(),
   progress: integer("progress").default(0),
 });
 
-export const nutritionPlans = sqliteTable("nutrition_plans", {
+export const nutritionPlans = pgTable("nutrition_plans", {
   id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   description: text("description"),
   dailyCalories: integer("daily_calories").notNull(),
@@ -309,21 +254,17 @@ export const nutritionPlans = sqliteTable("nutrition_plans", {
   groceryList: text("grocery_list"),
   cuisineType: text("cuisine_type"),
   budgetTier: text("budget_tier"),
-  isActive: integer("is_active", { mode: "boolean" }).default(true),
-  isAiGenerated: integer("is_ai_generated", { mode: "boolean" }).default(false),
-  startDate: integer("start_date", { mode: "timestamp" }),
-  endDate: integer("end_date", { mode: "timestamp" }),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`CURRENT_TIMESTAMP`),
+  isActive: boolean("is_active").default(true),
+  isAiGenerated: boolean("is_ai_generated").default(false),
+  startDate: timestamp("start_date", { mode: "date" }),
+  endDate: timestamp("end_date", { mode: "date" }),
+  createdAt: createdAt(),
 });
 
-export const foodLog = sqliteTable("food_log", {
+export const foodLog = pgTable("food_log", {
   id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  date: integer("date", { mode: "timestamp" }).notNull(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  date: timestamp("date", { mode: "date" }).notNull(),
   mealType: text("meal_type").notNull(),
   foodName: text("food_name").notNull(),
   calories: integer("calories"),
@@ -332,64 +273,47 @@ export const foodLog = sqliteTable("food_log", {
   fat: real("fat"),
   portion: text("portion"),
   notes: text("notes"),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`CURRENT_TIMESTAMP`),
+  createdAt: createdAt(),
 });
 
-export const chatSessions = sqliteTable("chat_sessions", {
+export const chatSessions = pgTable("chat_sessions", {
   id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   title: text("title"),
   summary: text("summary"),
   context: text("context"),
-  lastMessageAt: integer("last_message_at", { mode: "timestamp" }),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`CURRENT_TIMESTAMP`),
+  lastMessageAt: timestamp("last_message_at", { mode: "date" }),
+  createdAt: createdAt(),
 });
 
-export const chatMessages = sqliteTable("chat_messages", {
+export const chatMessages = pgTable("chat_messages", {
   id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   sessionId: text("session_id").references(() => chatSessions.id, { onDelete: "set null" }),
   role: text("role").notNull(),
   content: text("content").notNull(),
   metadata: text("metadata"),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`CURRENT_TIMESTAMP`),
+  createdAt: createdAt(),
 });
 
-export const notifications = sqliteTable("notifications", {
+export const notifications = pgTable("notifications", {
   id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   type: text("type").notNull(),
   title: text("title").notNull(),
   message: text("message").notNull(),
-  read: integer("read", { mode: "boolean" }).default(false),
+  read: boolean("read").default(false),
   actionUrl: text("action_url"),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`CURRENT_TIMESTAMP`),
+  createdAt: createdAt(),
 });
 
-export const verificationTokens = sqliteTable("verification_tokens", {
+export const verificationTokens = pgTable("verification_tokens", {
   id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  token: text("token").notNull().unique(),
-  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`CURRENT_TIMESTAMP`),
+  identifier: text("identifier").notNull(),
+  value: text("value").notNull(),
+  expiresAt: timestamp("expires_at", { mode: "date" }).notNull(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
 });
 
 export type User = typeof users.$inferSelect;

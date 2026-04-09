@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { foodLog } from "@/db/schema";
 import { requireServerSession } from "@/lib/auth/session";
+import { guardMutationRequest, getRequestIp } from "@/lib/security/request-guard";
 import { foodLogInputSchema } from "@/lib/validation/schemas";
 
 export async function GET(request: Request) {
@@ -23,6 +24,16 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const session = await requireServerSession(request);
+    const guard = guardMutationRequest(request, {
+      bucket: "nutrition-log",
+      key: `${session.user.id}:${getRequestIp(request)}`,
+      limit: 20,
+      windowMs: 60_000,
+    });
+    if (guard) {
+      return guard;
+    }
+
     const parsed = foodLogInputSchema.safeParse(await request.json());
     if (!parsed.success) {
       return NextResponse.json({ error: "Invalid food log payload", details: parsed.error.flatten() }, { status: 400 });

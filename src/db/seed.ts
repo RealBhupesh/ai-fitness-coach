@@ -391,8 +391,8 @@ const danceRoutineData = [
       ],
     }),
     difficulty: "beginner",
-    musicUrl: "/audio/dance/starter-groove.mp3",
-    thumbnailUrl: "/images/dance/zumba.jpg",
+    musicUrl: "/routines/starter-groove-click.wav",
+    thumbnailUrl: "/routines/starter-groove-thumbnail.svg",
   },
 ];
 

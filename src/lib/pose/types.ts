@@ -57,6 +57,11 @@ export type FrameAnalysis = {
   phase: string;
   metrics: LiveMetric[];
   issues: string[];
+  positives: string[];
+  corrections: string[];
+  injuryRisks: string[];
+  primaryFocus?: string;
+  trackedSide?: "left" | "right" | "both";
   targetCue?: string;
 };
 

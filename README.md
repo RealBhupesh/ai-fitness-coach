@@ -1,158 +1,132 @@
-# AI Fitness Dance Diet Coach 🏋️‍♀️💃🥗
+# AI Fitness Dance Diet Coach
 
-A comprehensive, production-ready AI-powered fitness coaching platform that combines workout training, dance instruction, and personalized nutrition planning with real-time form analysis and intelligent chat support.
+Production-oriented Next.js application for:
+- authenticated AI coaching chat
+- real-time workout posture feedback
+- dance phrase guidance and scoring
+- AI workout and nutrition generation
+- progress, achievements, and session history
 
-## 🌟 Features
+## Stack
 
-### Core Features
-- **🎥 Real-time Form Analysis**: MediaPipe-powered pose detection with instant feedback on exercise form
-- **💪 Comprehensive Exercise Library**:
-  - Strength Training (Squats, Lunges, Push-ups, Planks)
-  - Cardio (Jumping Jacks)
-  - HIIT (Burpees, Mountain Climbers)
-  - Yoga & Flexibility (Downward Dog, Child's Pose)
-- **💃 Dance Coaching**:
-  - Zumba
-  - Hip-Hop Dance
-  - Ballet Fitness
-  - Real-time posture and symmetry tracking
-- **🤖 AI Coach Chat**:
-  - ChatGPT-powered personal coach
-  - Context-aware of your profile (age, weight, height, goals, medical conditions)
-  - Personalized fitness, nutrition, and dance advice
-- **📊 Progress Tracking**:
-  - GitHub-style activity heatmap
-  - Weekly workout calendar
-  - Weight and measurements tracking
-  - Achievement system with 10+ milestones
-- **🍽️ Nutrition Planning**:
-  - Personalized meal plans
-  - Macro tracking
-  - Dietary preference support (vegetarian, vegan, keto, etc.)
+- Next.js 15 + React 19 + TypeScript 5
+- Drizzle ORM + PostgreSQL
+- better-auth
+- MediaPipe Pose
+- Groq as primary LLM provider
+- OpenAI as fallback LLM provider
 
-## 🚀 Getting Started
+## Core Architecture
 
-### Prerequisites
-- Node.js 18+ and npm
-- OpenAI API key (for AI coach chat feature)
+- Public routes: `/`, `/login`, `/signup`
+- Authenticated routes: `/dashboard`, `/coach/*`, `/workouts`, `/workout-plans`, `/nutrition`, `/progress`, `/achievements`, `/settings`, `/onboarding`
+- Middleware only redirects based on session-cookie presence
+- Route handlers are the real auth boundary through `requireServerSession()`
+- Live coach runtime is centered in [src/components/PoseAnalyzer.tsx](/g:/@final%20year%20project/ai-fitness-dance-diet-coach-main/src/components/PoseAnalyzer.tsx)
 
-### Installation
+## Environment
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/YourUsername/ai-fitness-dance-diet-coach.git
-   cd ai-fitness-dance-diet-coach
-   ```
+Copy `.env.example` to `.env.local`.
 
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
-
-3. **Set up environment variables**
-
-   Copy `.env.example` to `.env.local` and add your OpenAI API key:
-   ```env
-   DATABASE_URL=file:local.db
-   BETTER_AUTH_SECRET=your-secret-key
-   BETTER_AUTH_URL=http://localhost:3000
-   OPENAI_API_KEY=sk-your-openai-api-key-here
-   NEXT_PUBLIC_APP_URL=http://localhost:3000
-   ```
-
-4. **Initialize the database**
-   ```bash
-   npm run db:push    # Create database tables
-   npm run db:seed    # Seed with initial data
-   ```
-
-5. **Run the development server**
-   ```bash
-   npm run dev
-   ```
-
-6. **Open [http://localhost:3000](http://localhost:3000)**
-
-## 📁 Project Structure
-
-```
-src/
-├── app/                    # Next.js App Router
-│   ├── api/                # API routes (chat, exercises, workouts, profile)
-│   ├── coach/              # Coaching pages (chat, dance, workout)
-│   ├── dashboard/          # User dashboard
-│   ├── workouts/           # Workout library
-│   └── page.tsx            # Landing page
-├── components/             # React components
-│   ├── ui/                 # shadcn/ui components
-│   ├── AICoachChat.tsx     # Chat interface
-│   └── FormAnalyzer.tsx    # Pose detection
-├── db/                     # Database (schema, client, seed)
-└── lib/                    # Utilities and auth config
+Required:
+```env
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/fitcoach
+BETTER_AUTH_SECRET=replace-with-a-long-random-secret
+BETTER_AUTH_URL=http://localhost:3000
+NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
 
-## 🎯 Key Pages
+Optional but strongly recommended:
+```env
+TRUSTED_ORIGINS=http://localhost:3000
+GROQ_API_KEY=your-groq-api-key
+OPENAI_API_KEY=your-openai-api-key
+```
 
-- **`/`** - Landing page with features overview
-- **`/workouts`** - Browse exercise library by category
-- **`/coach/chat`** - Chat with AI fitness coach
-- **`/coach/workout`** - Real-time workout coaching with form analysis
-- **`/coach/dance`** - Dance coaching with posture tracking
-- **`/dashboard`** - Progress tracking and analytics
+Notes:
+- `DATABASE_URL` must point to PostgreSQL now. SQLite/libSQL is no longer the active baseline.
+- If `GROQ_API_KEY` is set, Groq is used first.
+- If Groq is unavailable and `OPENAI_API_KEY` exists, OpenAI is used as fallback.
 
-## 🗄️ Database
+## Local Setup
 
-The app uses SQLite (via Drizzle ORM) with tables for:
-- Users & authentication
-- Exercise & dance libraries (pre-seeded)
-- Workout sessions & tracking
-- Nutrition plans & food logs
-- Chat messages & sessions
-- Progress tracking & achievements
+1. Install dependencies:
+```bash
+npm install
+```
 
-## 🛠️ Available Scripts
+2. Push the schema to your Postgres database:
+```bash
+npm run db:push
+```
+
+3. Seed baseline content:
+```bash
+npm run db:seed
+```
+
+4. Start the app:
+```bash
+npm run dev
+```
+
+5. Optional health check:
+```bash
+curl http://localhost:3000/api/health
+```
+
+## Available Scripts
 
 ```bash
-npm run dev          # Start development server
-npm run build        # Build for production
-npm run db:push      # Update database schema
-npm run db:seed      # Seed initial data
-npm run db:studio    # Open database GUI
+npm run dev
+npm run build
+npm run test
+npm run test:e2e
+npm run db:generate
+npm run db:push
+npm run db:seed
+npm run db:studio
 ```
 
-## 🎨 Tech Stack
+## Dance Module
 
-- **Next.js 15** + **React 19** + **TypeScript 5**
-- **Tailwind CSS 4** + **shadcn/ui**
-- **Drizzle ORM** + **SQLite/Turso**
-- **better-auth** for authentication
-- **OpenAI API** for AI chat
-- **MediaPipe** for pose detection
+The primary routine pack lives in:
+- `public/routines/starter-groove-pack.json`
+- `public/routines/starter-groove-click.wav`
+- `public/routines/starter-groove-thumbnail.svg`
 
-## 🚀 Deployment
+The server route `GET /api/dance/routine` prefers the packaged routine asset and falls back to the DB-seeded routine only if the asset pack is unavailable.
 
-For production, use Turso for the database:
+## Tests
 
-```bash
-# Create Turso database
-turso db create ai-fitness-coach
+Current automated coverage includes:
+- Vitest unit tests for pose math
+- Vitest unit tests for the dance comparator
+- Vitest unit tests for request-guard behavior
+- Playwright smoke coverage for login and signup rendering
 
-# Get credentials
-turso db show ai-fitness-coach --url
-turso db tokens create ai-fitness-coach
+Real-device camera QA is still required before calling the live coach fully release-ready.
 
-# Update .env with Turso credentials
-DATABASE_URL=libsql://your-database.turso.io
-DATABASE_AUTH_TOKEN=your-token
+## Important Files
 
-# Deploy to Vercel
-vercel
-```
+Read these first if you are taking over:
+- `CONTEXT.md`
+- `src/db/schema.ts`
+- `src/db/index.ts`
+- `src/lib/auth/config.ts`
+- `src/lib/server/app-data.ts`
+- `src/lib/pose/*`
+- `src/lib/dance/*`
+- `src/components/PoseAnalyzer.tsx`
+- `src/app/api/*`
 
-## 📄 License
+## Current Status
 
-MIT License
+- `npm run build` passes
+- protected POST APIs now require authenticated sessions
+- request origin checks and in-memory rate limiting are enabled on mutating APIs
+- chat session summary/context are now used in the AI prompt path
+- live coach voice feedback is handled through a dedicated controller
+- dance now uses a packaged routine asset plus segment comparison
 
----
-
-Built with ❤️ using Next.js, React, and AI
+For deeper handoff history, use `CONTEXT.md`.

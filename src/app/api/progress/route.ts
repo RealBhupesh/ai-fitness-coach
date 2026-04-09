@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { progressTracking, workoutSessions } from "@/db/schema";
 import { requireServerSession } from "@/lib/auth/session";
+import { guardMutationRequest, getRequestIp } from "@/lib/security/request-guard";
 import { calculateStreak } from "@/lib/server/app-data";
 import { progressInputSchema } from "@/lib/validation/schemas";
 import { parseJsonObject, toJson } from "@/lib/utils/json";
@@ -53,6 +54,16 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const session = await requireServerSession(request);
+    const guard = guardMutationRequest(request, {
+      bucket: "progress",
+      key: `${session.user.id}:${getRequestIp(request)}`,
+      limit: 20,
+      windowMs: 60_000,
+    });
+    if (guard) {
+      return guard;
+    }
+
     const parsed = progressInputSchema.safeParse(await request.json());
     if (!parsed.success) {
       return NextResponse.json({ error: "Invalid progress payload", details: parsed.error.flatten() }, { status: 400 });

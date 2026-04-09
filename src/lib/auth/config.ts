@@ -2,10 +2,17 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
+import { getAppBaseUrl, getTrustedOrigins, validateServerEnv } from "@/lib/env";
+
+const envState = validateServerEnv();
+
+if (!envState.ok) {
+  throw new Error(`Missing required server environment variables: ${envState.missing.join(", ")}`);
+}
 
 export const auth = betterAuth({
   database: drizzleAdapter(db, {
-    provider: "sqlite",
+    provider: "pg",
     schema: {
       user: schema.users,
       session: schema.sessions,
@@ -29,15 +36,16 @@ export const auth = betterAuth({
     updateAge: 60 * 60 * 24, // 1 day
   },
   advanced: {
-    generateId: () => {
-      // Using nanoid for ID generation
-      const { nanoid } = require("nanoid");
-      return nanoid();
+    database: {
+      generateId: () => {
+        const { nanoid } = require("nanoid");
+        return nanoid();
+      },
     },
   },
   secret: process.env.BETTER_AUTH_SECRET!,
-  baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3000",
-  trustedOrigins: ["http://localhost:3000"],
+  baseURL: getAppBaseUrl(),
+  trustedOrigins: getTrustedOrigins(),
 });
 
 export type Session = typeof auth.$Infer.Session;

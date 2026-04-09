@@ -1,0 +1,178 @@
+{
+  "id": "starter-groove-pack",
+  "name": "Starter Groove Flow",
+  "description": "A beginner-friendly dance routine focused on frame width, soft-knee groove, centered torso control, and hitting the phrase on time.",
+  "difficulty": "beginner",
+  "durationMs": 60000,
+  "bpm": 96,
+  "audioUrl": "/routines/starter-groove-click.wav",
+  "thumbnailUrl": "/routines/starter-groove-thumbnail.svg",
+  "checkpoints": [
+    { "timeMs": 0, "cue": "Open frame on the beat", "target": "dance_basic" },
+    { "timeMs": 8000, "cue": "Drop into the groove without collapsing", "target": "dance_basic" },
+    { "timeMs": 16000, "cue": "Hit the arms wide and level", "target": "dance_basic" },
+    { "timeMs": 24000, "cue": "Reset center before the next phrase", "target": "dance_basic" },
+    { "timeMs": 32000, "cue": "Ride the groove with soft knees", "target": "dance_basic" },
+    { "timeMs": 40000, "cue": "Snap the hit, then release cleanly", "target": "dance_basic" },
+    { "timeMs": 48000, "cue": "Finish the phrase tall and even", "target": "dance_basic" }
+  ],
+  "segments": [
+    {
+      "id": "open-hit-a",
+      "label": "Open Hit",
+      "startMs": 0,
+      "endMs": 8000,
+      "cue": "Open frame on the beat",
+      "focus": "wide frame and level wrists",
+      "targetMetrics": {
+        "frameWidth": [54, 88],
+        "armLift": [2, 18],
+        "torsoLeanMax": 8,
+        "kneeAngle": [138, 162],
+        "symmetryMax": 7
+      },
+      "targetLandmarks": {
+        "leftWrist": { "x": -0.95, "y": -0.28 },
+        "rightWrist": { "x": 0.95, "y": -0.28 },
+        "leftShoulder": { "x": -0.5, "y": 0 },
+        "rightShoulder": { "x": 0.5, "y": 0 },
+        "leftHip": { "x": -0.34, "y": 1.04 },
+        "rightHip": { "x": 0.34, "y": 1.04 },
+        "leftKnee": { "x": -0.32, "y": 1.8 },
+        "rightKnee": { "x": 0.32, "y": 1.8 }
+      }
+    },
+    {
+      "id": "groove-drop-a",
+      "label": "Groove Drop",
+      "startMs": 8000,
+      "endMs": 16000,
+      "cue": "Drop into the groove without collapsing",
+      "focus": "soft knees and stacked torso",
+      "targetMetrics": {
+        "frameWidth": [40, 68],
+        "armLift": [-4, 8],
+        "torsoLeanMax": 7,
+        "kneeAngle": [132, 152],
+        "symmetryMax": 7
+      },
+      "targetLandmarks": {
+        "leftWrist": { "x": -0.66, "y": -0.02 },
+        "rightWrist": { "x": 0.66, "y": -0.02 },
+        "leftShoulder": { "x": -0.5, "y": 0.04 },
+        "rightShoulder": { "x": 0.5, "y": 0.04 },
+        "leftHip": { "x": -0.34, "y": 1.1 },
+        "rightHip": { "x": 0.34, "y": 1.1 },
+        "leftKnee": { "x": -0.29, "y": 1.9 },
+        "rightKnee": { "x": 0.29, "y": 1.9 }
+      }
+    },
+    {
+      "id": "open-hit-b",
+      "label": "Open Hit B",
+      "startMs": 16000,
+      "endMs": 24000,
+      "cue": "Hit the arms wide and level",
+      "focus": "arm carriage and symmetry",
+      "targetMetrics": {
+        "frameWidth": [56, 90],
+        "armLift": [5, 20],
+        "torsoLeanMax": 8,
+        "kneeAngle": [140, 164],
+        "symmetryMax": 6
+      },
+      "targetLandmarks": {
+        "leftWrist": { "x": -0.98, "y": -0.32 },
+        "rightWrist": { "x": 0.98, "y": -0.32 },
+        "leftShoulder": { "x": -0.5, "y": 0 },
+        "rightShoulder": { "x": 0.5, "y": 0 },
+        "leftHip": { "x": -0.34, "y": 1.02 },
+        "rightHip": { "x": 0.34, "y": 1.02 }
+      }
+    },
+    {
+      "id": "reset-center",
+      "label": "Reset Center",
+      "startMs": 24000,
+      "endMs": 32000,
+      "cue": "Reset center before the next phrase",
+      "focus": "torso center and clean transition",
+      "targetMetrics": {
+        "frameWidth": [36, 60],
+        "armLift": [-5, 6],
+        "torsoLeanMax": 6,
+        "kneeAngle": [136, 154],
+        "symmetryMax": 6
+      },
+      "targetLandmarks": {
+        "leftWrist": { "x": -0.52, "y": 0.02 },
+        "rightWrist": { "x": 0.52, "y": 0.02 },
+        "leftHip": { "x": -0.34, "y": 1.08 },
+        "rightHip": { "x": 0.34, "y": 1.08 }
+      }
+    },
+    {
+      "id": "groove-ride",
+      "label": "Groove Ride",
+      "startMs": 32000,
+      "endMs": 40000,
+      "cue": "Ride the groove with soft knees",
+      "focus": "bounce through the legs",
+      "targetMetrics": {
+        "frameWidth": [38, 64],
+        "armLift": [-2, 8],
+        "torsoLeanMax": 7,
+        "kneeAngle": [130, 150],
+        "symmetryMax": 7
+      },
+      "targetLandmarks": {
+        "leftWrist": { "x": -0.58, "y": 0.04 },
+        "rightWrist": { "x": 0.58, "y": 0.04 },
+        "leftKnee": { "x": -0.28, "y": 1.94 },
+        "rightKnee": { "x": 0.28, "y": 1.94 }
+      }
+    },
+    {
+      "id": "snap-release",
+      "label": "Snap And Release",
+      "startMs": 40000,
+      "endMs": 48000,
+      "cue": "Snap the hit, then release cleanly",
+      "focus": "timing and transition quality",
+      "targetMetrics": {
+        "frameWidth": [52, 86],
+        "armLift": [4, 18],
+        "torsoLeanMax": 8,
+        "kneeAngle": [138, 160],
+        "symmetryMax": 7
+      },
+      "targetLandmarks": {
+        "leftWrist": { "x": -0.92, "y": -0.26 },
+        "rightWrist": { "x": 0.92, "y": -0.26 },
+        "leftShoulder": { "x": -0.5, "y": 0 },
+        "rightShoulder": { "x": 0.5, "y": 0 }
+      }
+    },
+    {
+      "id": "finish-phrase",
+      "label": "Finish Phrase",
+      "startMs": 48000,
+      "endMs": 60000,
+      "cue": "Finish the phrase tall and even",
+      "focus": "balanced finish and posture",
+      "targetMetrics": {
+        "frameWidth": [46, 78],
+        "armLift": [0, 12],
+        "torsoLeanMax": 6,
+        "kneeAngle": [136, 156],
+        "symmetryMax": 6
+      },
+      "targetLandmarks": {
+        "leftWrist": { "x": -0.7, "y": -0.08 },
+        "rightWrist": { "x": 0.7, "y": -0.08 },
+        "leftHip": { "x": -0.34, "y": 1.06 },
+        "rightHip": { "x": 0.34, "y": 1.06 }
+      }
+    }
+  ]
+}

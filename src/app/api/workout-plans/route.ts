@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { workoutPlans } from "@/db/schema";
 import { requireServerSession } from "@/lib/auth/session";
+import { guardMutationRequest, getRequestIp } from "@/lib/security/request-guard";
 import { workoutPlanCreateSchema } from "@/lib/validation/schemas";
 import { toJson } from "@/lib/utils/json";
 import { buildFallbackWorkoutPlan } from "@/lib/server/app-data";
@@ -25,6 +26,16 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const session = await requireServerSession(request);
+    const guard = guardMutationRequest(request, {
+      bucket: "workout-plans",
+      key: `${session.user.id}:${getRequestIp(request)}`,
+      limit: 12,
+      windowMs: 60_000,
+    });
+    if (guard) {
+      return guard;
+    }
+
     const parsed = workoutPlanCreateSchema.safeParse(await request.json());
     if (!parsed.success) {
       return NextResponse.json({ error: "Invalid plan payload", details: parsed.error.flatten() }, { status: 400 });

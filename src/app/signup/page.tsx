@@ -4,7 +4,6 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { signUp } from "@/lib/auth/client";
-import { createDummySession } from "@/lib/dummy-auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -18,12 +17,6 @@ export default function SignupPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-
-  const handleDemoSignup = () => {
-    createDummySession("Demo Athlete");
-    router.push("/onboarding");
-    router.refresh();
-  };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -80,9 +73,6 @@ export default function SignupPage() {
             {error ? <p className="text-sm text-rose-400">{error}</p> : null}
             <Button className="w-full bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600" disabled={submitting}>
               {submitting ? "Creating account..." : "Create account"}
-            </Button>
-            <Button type="button" variant="outline" className="w-full" onClick={handleDemoSignup}>
-              Continue with demo account
             </Button>
           </form>
           <p className="mt-4 text-sm text-zinc-400">

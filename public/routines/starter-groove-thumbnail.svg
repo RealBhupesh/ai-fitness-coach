@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="450" viewBox="0 0 800 450" fill="none">
+  <rect width="800" height="450" rx="32" fill="#0B0F17"/>
+  <rect x="24" y="24" width="752" height="402" rx="24" fill="url(#bg)"/>
+  <circle cx="180" cy="128" r="92" fill="#F97316" fill-opacity="0.14"/>
+  <circle cx="642" cy="316" r="110" fill="#14B8A6" fill-opacity="0.14"/>
+  <path d="M400 116C431.48 116 457 141.52 457 173C457 204.48 431.48 230 400 230C368.52 230 343 204.48 343 173C343 141.52 368.52 116 400 116Z" fill="#F8FAFC"/>
+  <path d="M315 278C334.8 236.6 366.6 214 400 214C433.4 214 465.2 236.6 485 278L519 348H459L432 296L400 324L368 296L341 348H281L315 278Z" fill="#F8FAFC"/>
+  <path d="M291 256L208 222" stroke="#F8FAFC" stroke-width="26" stroke-linecap="round"/>
+  <path d="M509 256L592 222" stroke="#F8FAFC" stroke-width="26" stroke-linecap="round"/>
+  <path d="M370 349L331 404" stroke="#F8FAFC" stroke-width="28" stroke-linecap="round"/>
+  <path d="M430 349L469 404" stroke="#F8FAFC" stroke-width="28" stroke-linecap="round"/>
+  <text x="64" y="74" fill="#FDBA74" font-family="Arial, sans-serif" font-size="28" font-weight="700">Starter Groove Flow</text>
+  <text x="64" y="104" fill="#CBD5E1" font-family="Arial, sans-serif" font-size="18">Wide frame. Soft knees. Clean timing.</text>
+  <defs>
+    <linearGradient id="bg" x1="24" y1="24" x2="776" y2="426" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#111827"/>
+      <stop offset="0.55" stop-color="#1F2937"/>
+      <stop offset="1" stop-color="#0F172A"/>
+    </linearGradient>
+  </defs>
+</svg>

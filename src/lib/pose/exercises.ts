@@ -1,6 +1,18 @@
 import { angle, average, clamp, distance, midpoint, scoreFromRange, scoreFromTarget } from "@/lib/pose/math";
 import type { ExerciseId, FrameAnalysis, Landmark, LiveMetric, PoseExercise } from "@/lib/pose/types";
 
+type ArmSide = "left" | "right";
+type CurlSnapshot = {
+  side: ArmSide;
+  shoulder: Landmark | undefined;
+  elbow: Landmark | undefined;
+  wrist: Landmark | undefined;
+  hip: Landmark | undefined;
+  oppositeShoulder: Landmark | undefined;
+  elbowAngle: number;
+  visibility: number;
+};
+
 export const POSE_CONNECTIONS: Array<[number, number]> = [
   [11, 12], [11, 13], [13, 15], [12, 14], [14, 16],
   [11, 23], [12, 24], [23, 24], [23, 25], [25, 27],
@@ -77,7 +89,7 @@ export const POSE_EXERCISES: PoseExercise[] = [
     icon: "D",
     category: "dance",
     repBased: false,
-    tips: ["Tall spine", "Level shoulders", "Stay on the beat"],
+    tips: ["Keep ribs stacked over hips", "Reach both wrists evenly", "Keep knees soft on every count"],
     calibration: ["Front view preferred", "Both wrists visible", "Leave lateral room for arm lines"],
   },
 ];
@@ -91,8 +103,7 @@ function selectSide(landmarks: Landmark[]) {
   return left >= right ? "left" : "right";
 }
 
-function sideLandmarks(landmarks: Landmark[]) {
-  const side = selectSide(landmarks);
+function sideLandmarks(landmarks: Landmark[], side = selectSide(landmarks)) {
   return {
     shoulder: LM(landmarks, side === "left" ? 11 : 12),
     elbow: LM(landmarks, side === "left" ? 13 : 14),
@@ -112,7 +123,11 @@ function metric(name: string, score: number, detail: string, value?: number, tar
   return { name, score, detail, value, target, status: statusForScore(score) };
 }
 
-function finalize(phase: string, metrics: LiveMetric[]): FrameAnalysis {
+function finalize(
+  phase: string,
+  metrics: LiveMetric[],
+  extras: Partial<Pick<FrameAnalysis, "positives" | "corrections" | "injuryRisks" | "primaryFocus" | "trackedSide" | "targetCue">> = {},
+): FrameAnalysis {
   const form = Math.round(average(metrics.slice(0, 2).map((item) => item.score)));
   const rom = Math.round(metrics.find((item) => item.name.includes("Range"))?.score ?? metrics[0]?.score ?? 0);
   const tempo = Math.round(metrics.find((item) => item.name.includes("Tempo"))?.score ?? form);
@@ -123,6 +138,14 @@ function finalize(phase: string, metrics: LiveMetric[]): FrameAnalysis {
   const safety = Math.round(Math.min(...metrics.map((item) => item.score)));
   const overall = Math.round(average([form, rom, tempo, stability, symmetry, consistency, endurance, safety]));
   const issues = metrics.filter((item) => item.score < 70).map((item) => item.detail);
+  const corrections = extras.corrections ?? issues;
+  const positives =
+    extras.positives ??
+    metrics
+      .filter((item) => item.score >= 85)
+      .slice(0, 3)
+      .map((item) => item.detail);
+  const injuryRisks = extras.injuryRisks ?? [];
 
   return {
     form,
@@ -137,7 +160,297 @@ function finalize(phase: string, metrics: LiveMetric[]): FrameAnalysis {
     phase,
     metrics,
     issues,
+    positives,
+    corrections,
+    injuryRisks,
+    primaryFocus: extras.primaryFocus ?? corrections[0] ?? injuryRisks[0] ?? positives[0],
+    trackedSide: extras.trackedSide,
+    targetCue: extras.targetCue,
   };
+}
+
+function getCurlSnapshot(landmarks: Landmark[], side: ArmSide): CurlSnapshot {
+  const { shoulder, elbow, wrist, hip } = sideLandmarks(landmarks, side);
+  return {
+    side,
+    shoulder,
+    elbow,
+    wrist,
+    hip,
+    oppositeShoulder: LM(landmarks, side === "left" ? 12 : 11),
+    elbowAngle: angle(shoulder, elbow, wrist),
+    visibility: average([vis(shoulder), vis(elbow), vis(wrist), vis(hip)]),
+  };
+}
+
+function chooseCurlSnapshot(landmarks: Landmark[]) {
+  const left = getCurlSnapshot(landmarks, "left");
+  const right = getCurlSnapshot(landmarks, "right");
+  const bothVisible = left.visibility > 0.6 && right.visibility > 0.6;
+  const primarySide: ArmSide =
+    left.visibility === right.visibility
+      ? Math.abs(left.elbowAngle - 95) <= Math.abs(right.elbowAngle - 95)
+        ? "left"
+        : "right"
+      : left.visibility > right.visibility
+        ? "left"
+        : "right";
+  const primary = primarySide === "left" ? left : right;
+  const secondary = primarySide === "left" ? right : left;
+
+  return {
+    primary,
+    secondary,
+    trackedSide: bothVisible && Math.abs(left.elbowAngle - right.elbowAngle) <= 12 ? ("both" as const) : primarySide,
+  };
+}
+
+function analyzeBicepCurl(landmarks: Landmark[]) {
+  const { primary, secondary, trackedSide } = chooseCurlSnapshot(landmarks);
+  const elbowAngle = primary.elbowAngle;
+  const phase = getPhaseForExercise("bicep_curl", landmarks);
+  const isTop = phase === "top";
+  const isBottom = phase === "bottom";
+
+  const topRangeScore = scoreFromRange(elbowAngle, 40, 70, 18);
+  const bottomRangeScore = scoreFromRange(elbowAngle, 150, 175, 18);
+  const midRangeScore = scoreFromRange(elbowAngle, 75, 145, 28);
+  const rangeScore = isTop ? topRangeScore : isBottom ? bottomRangeScore : midRangeScore;
+
+  const elbowForwardDrift = Math.abs((primary.elbow?.x ?? 0) - (primary.shoulder?.x ?? 0)) * 100;
+  const shoulderHike = Math.max(0, ((primary.oppositeShoulder?.y ?? primary.shoulder?.y ?? 0) - (primary.shoulder?.y ?? 0)) * 100);
+  const torsoSwing = Math.abs((primary.shoulder?.x ?? 0) - (primary.hip?.x ?? 0)) * 100;
+  const wristBend = Math.abs((primary.wrist?.x ?? 0) - (primary.elbow?.x ?? 0)) * 100;
+  const symmetryGap = secondary.visibility > 0.45 ? Math.abs(primary.elbowAngle - secondary.elbowAngle) : 0;
+
+  const metrics = [
+    metric(
+      "Range",
+      rangeScore,
+      isTop
+        ? elbowAngle > 72
+          ? "Curl higher and finish with your forearm closer to your shoulder."
+          : elbowAngle < 35
+            ? "Squeeze at the top, then reverse; do not jam the elbow shut."
+            : "Top squeeze looks strong."
+        : isBottom
+          ? elbowAngle < 150
+            ? "Lower all the way down before the next rep."
+            : elbowAngle > 177
+              ? "Keep a soft elbow at the bottom; avoid snapping into lockout."
+              : "Bottom position is controlled and long."
+          : "Range is moving smoothly through the mid-zone.",
+      Math.round(elbowAngle),
+      isTop ? "40-70° top" : isBottom ? "150-175° bottom" : "75-145° mid",
+    ),
+    metric(
+      "Elbow Path",
+      scoreFromTarget(elbowForwardDrift, 0, 7),
+      elbowForwardDrift > 8
+        ? `Keep your ${trackedSide === "both" ? "elbows" : `${primary.side} elbow`} pinned to your ribs; it is drifting forward.`
+        : `Good ${trackedSide === "both" ? "elbow path" : `${primary.side} elbow path`}; upper arm is staying still.`,
+      Number(elbowForwardDrift.toFixed(1)),
+      "0-7 drift",
+    ),
+    metric(
+      "Shoulder Stability",
+      scoreFromTarget(shoulderHike, 0, 5),
+      shoulderHike > 6 ? `Stop shrugging your ${primary.side} shoulder to finish the curl.` : "Shoulder is staying quiet and out of the rep.",
+      Number(shoulderHike.toFixed(1)),
+      "0-5 lift",
+    ),
+    metric(
+      "Torso Stability",
+      scoreFromTarget(torsoSwing, 0, 8),
+      torsoSwing > 9 ? "Brace your abs and stop swinging your torso to start the rep." : "Torso is quiet; the curl is coming from the arm.",
+      Number(torsoSwing.toFixed(1)),
+      "0-8 sway",
+    ),
+    metric(
+      "Wrist Stack",
+      scoreFromTarget(wristBend, 0, 14),
+      wristBend > 16 ? `Straighten your ${primary.side} wrist; keep the dumbbell stacked over the forearm.` : "Wrist stays stacked over the forearm.",
+      Number(wristBend.toFixed(1)),
+      "0-14 bend",
+    ),
+    metric(
+      "Symmetry",
+      secondary.visibility > 0.45 ? scoreFromTarget(symmetryGap, 0, 12) : 88,
+      secondary.visibility > 0.45
+        ? symmetryGap > 13
+          ? "One arm is moving ahead of the other; match both elbows and wrists."
+          : "Both arms are moving together."
+        : "Single-arm tracking is stable.",
+      Math.round(symmetryGap),
+      secondary.visibility > 0.45 ? "0-12° gap" : "single-arm",
+    ),
+  ];
+
+  const positives = [
+    metrics[1].score >= 85 ? `Your ${trackedSide === "both" ? "elbows are" : `${primary.side} elbow is`} staying tucked well.` : "",
+    metrics[3].score >= 85 ? "Your torso is quiet; there is no cheating swing." : "",
+    metrics[4].score >= 85 ? `Your ${primary.side} wrist is stacked well under the load.` : "",
+    metrics[0].score >= 90 && isTop ? "You are finishing the rep with a clean squeeze at the top." : "",
+    metrics[0].score >= 90 && isBottom ? "You are getting full controlled length at the bottom." : "",
+  ].filter(Boolean);
+
+  const corrections = metrics
+    .filter((item) => item.score < 78)
+    .sort((a, b) => a.score - b.score)
+    .map((item) => item.detail)
+    .slice(0, 4);
+
+  const injuryRisks = [
+    elbowAngle < 28 ? "You are crushing the elbow shut at the top. Squeeze and reverse instead of forcing the joint closed." : "",
+    elbowAngle > 178 ? "You are locking the elbow hard at the bottom. Keep a soft elbow and control the lowering." : "",
+    torsoSwing > 13 ? "Torso swing is starting the lift. That shifts load into the low back instead of the biceps." : "",
+    shoulderHike > 7 ? "Shrugging to finish the curl can irritate the front of the shoulder." : "",
+    wristBend > 18 ? "A bent wrist under load can irritate the wrist and forearm tendons." : "",
+  ].filter(Boolean);
+
+  return finalize(phase, metrics, {
+    positives,
+    corrections,
+    injuryRisks,
+    primaryFocus: injuryRisks[0] ?? corrections[0] ?? positives[0],
+    trackedSide,
+  });
+}
+
+function analyzeDanceBasic(landmarks: Landmark[], danceBeat = 0, danceTargetCue?: string) {
+  const leftShoulder = LM(landmarks, 11);
+  const rightShoulder = LM(landmarks, 12);
+  const leftWrist = LM(landmarks, 15);
+  const rightWrist = LM(landmarks, 16);
+  const leftHip = LM(landmarks, 23);
+  const rightHip = LM(landmarks, 24);
+  const leftKnee = LM(landmarks, 25);
+  const rightKnee = LM(landmarks, 26);
+  const leftAnkle = LM(landmarks, 27);
+  const rightAnkle = LM(landmarks, 28);
+  const shoulderCenter = midpoint(leftShoulder, rightShoulder);
+  const hipCenter = midpoint(leftHip, rightHip);
+  const phaseIndex = ((danceBeat % 4) + 4) % 4;
+  const openCount = phaseIndex === 0 || phaseIndex === 2;
+  const phase = openCount ? "hit" : phaseIndex === 1 ? "groove" : "reset";
+
+  const shoulderLevel = Math.abs((leftShoulder?.y ?? 0) - (rightShoulder?.y ?? 0)) * 100;
+  const hipLevel = Math.abs((leftHip?.y ?? 0) - (rightHip?.y ?? 0)) * 100;
+  const frameWidth = distance(leftWrist, rightWrist) * 100;
+  const armHeightMismatch = Math.abs((leftWrist?.y ?? 0) - (rightWrist?.y ?? 0)) * 100;
+  const averageArmLift = average([
+    ((leftShoulder?.y ?? 0) - (leftWrist?.y ?? 0)) * 100,
+    ((rightShoulder?.y ?? 0) - (rightWrist?.y ?? 0)) * 100,
+  ]);
+  const torsoLean = Math.abs((shoulderCenter?.x ?? 0) - (hipCenter?.x ?? 0)) * 100;
+  const leftKneeAngle = angle(leftHip, leftKnee, leftAnkle);
+  const rightKneeAngle = angle(rightHip, rightKnee, rightAnkle);
+  const averageKneeAngle = average([leftKneeAngle, rightKneeAngle]);
+  const asymmetry = average([armHeightMismatch, shoulderLevel, hipLevel]);
+
+  const targetFrameWidth = openCount ? 72 : 56;
+  const targetArmLift = openCount ? 10 : 1;
+  const targetKneeAngle = openCount ? 162 : 150;
+  const cue = danceTargetCue ?? (openCount ? "Hit the next count with a wide frame" : "Settle into the groove with soft knees");
+
+  const metrics = [
+    metric(
+      "Frame Width",
+      scoreFromTarget(frameWidth, targetFrameWidth, openCount ? 18 : 16),
+      openCount
+        ? frameWidth < 56
+          ? "Reach both wrists wider on this count so the frame reads bigger."
+          : frameWidth > 96
+            ? "Keep the frame wide but connected; do not over-stretch the arms past control."
+            : "Frame width is reading clean on the beat."
+        : frameWidth < 42
+          ? "Open the elbows slightly more so the groove does not collapse inward."
+          : "Your frame stays open while you groove.",
+      Number(frameWidth.toFixed(1)),
+      openCount ? "54-90 width" : "40-72 width",
+    ),
+    metric(
+      "Arm Range",
+      Math.round(average([scoreFromTarget(armHeightMismatch, 0, 7), scoreFromTarget(averageArmLift, targetArmLift, openCount ? 10 : 8)])),
+      armHeightMismatch > 8
+        ? "One wrist is dropping below the other. Match both arm lines on the count."
+        : openCount && averageArmLift < 2
+          ? "Lift both wrists higher so the hit lands at shoulder level."
+          : !openCount && averageArmLift > 12
+            ? "Let the arms settle slightly on the groove instead of holding them too high."
+            : "Both arms are matching the line well.",
+      Number(averageArmLift.toFixed(1)),
+      openCount ? "lift 2-20" : "lift -7 to 9",
+    ),
+    metric(
+      "Torso Stability",
+      scoreFromTarget(torsoLean, 0, 8),
+      torsoLean > 9 ? "Stack your ribs over your hips. Your torso is leaning off-center." : "Torso stays stacked over the hips.",
+      Number(torsoLean.toFixed(1)),
+      "0-8 lean",
+    ),
+    metric(
+      "Knee Bounce",
+      scoreFromTarget(averageKneeAngle, targetKneeAngle, openCount ? 16 : 14),
+      averageKneeAngle > 173
+        ? "Soften both knees. You are locking out between counts."
+        : averageKneeAngle < 126
+          ? "You are sinking too low for this groove. Keep the bounce lighter and quicker."
+          : "Knee bounce matches the groove.",
+      Math.round(averageKneeAngle),
+      openCount ? "146-178 degrees" : "136-164 degrees",
+    ),
+    metric(
+      "Tempo Timing",
+      scoreFromTarget(averageArmLift, targetArmLift, openCount ? 8 : 7),
+      openCount
+        ? averageArmLift < 1
+          ? "You are late getting the arms up. Hit the count earlier."
+          : "The arm hit is landing on time."
+        : averageArmLift > 10
+          ? "You are holding the hit too long. Drop into the groove sooner."
+          : "Your groove timing is matching the beat.",
+      Number(averageArmLift.toFixed(1)),
+      openCount ? "hit higher" : "groove lower",
+    ),
+    metric(
+      "Symmetry",
+      scoreFromTarget(asymmetry, 0, 7),
+      asymmetry > 8 ? "Shoulders, hips, and wrists are not matching side to side. Clean up the left-right balance." : "Left-right balance looks controlled.",
+      Number(asymmetry.toFixed(1)),
+      "0-7 mismatch",
+    ),
+  ];
+
+  const positives = [
+    metrics[0].score >= 85 ? "Your frame width is clear and readable." : "",
+    metrics[1].score >= 85 ? "Both wrists are matching the line well." : "",
+    metrics[2].score >= 85 ? "Your torso is stacked cleanly over the hips." : "",
+    metrics[3].score >= 85 ? "Your knees stay soft instead of snapping straight." : "",
+    metrics[4].score >= 88 ? "Your timing is landing with the music instead of chasing it." : "",
+  ].filter(Boolean);
+
+  const corrections = metrics
+    .filter((item) => item.score < 78)
+    .sort((a, b) => a.score - b.score)
+    .map((item) => item.detail)
+    .slice(0, 4);
+
+  const injuryRisks = [
+    averageKneeAngle > 175 ? "Your knees are locking on the beat. Keep a soft bend so the joints do not absorb the whole impact." : "",
+    torsoLean > 13 ? "Your torso is dumping sideways instead of staying stacked. That can irritate the low back if it keeps repeating." : "",
+    shoulderLevel > 10 ? "One shoulder is hiking higher than the other. Do not shrug into the arm line." : "",
+    hipLevel > 10 ? "Your hips are tilting instead of shifting smoothly. Reset your stance before the next phrase." : "",
+  ].filter(Boolean);
+
+  return finalize(phase, metrics, {
+    positives,
+    corrections,
+    injuryRisks,
+    primaryFocus: injuryRisks[0] ?? corrections[0] ?? cue,
+    trackedSide: "both",
+    targetCue: cue,
+  });
 }
 
 export function getPhaseForExercise(exerciseId: ExerciseId, landmarks: Landmark[]) {
@@ -181,7 +494,7 @@ export function getPhaseForExercise(exerciseId: ExerciseId, landmarks: Landmark[
   return "hold";
 }
 
-export function analyzeExercise(exerciseId: ExerciseId, landmarks: Landmark[], danceBeat = 0): FrameAnalysis {
+export function analyzeExercise(exerciseId: ExerciseId, landmarks: Landmark[], danceBeat = 0, danceTargetCue?: string): FrameAnalysis {
   const leftShoulder = LM(landmarks, 11);
   const rightShoulder = LM(landmarks, 12);
   const leftElbow = LM(landmarks, 13);
@@ -233,6 +546,14 @@ export function analyzeExercise(exerciseId: ExerciseId, landmarks: Landmark[], d
   }
 
   if (exerciseId === "bicep_curl") {
+    return analyzeBicepCurl(landmarks);
+  }
+
+  if (exerciseId === "dance_basic") {
+    return analyzeDanceBasic(landmarks, danceBeat, danceTargetCue);
+  }
+
+  if (false) {
     const { shoulder, elbow, wrist, hip } = sideLandmarks(landmarks);
     const elbowAngle = angle(shoulder, elbow, wrist);
     const extensionScore = scoreFromRange(elbowAngle, 145, 175, 25);
@@ -306,17 +627,10 @@ export function analyzeExercise(exerciseId: ExerciseId, landmarks: Landmark[], d
     ]);
   }
 
-  const shoulderLevel = Math.abs((leftShoulder?.y ?? 0) - (rightShoulder?.y ?? 0)) * 100;
-  const hipLevel = Math.abs((leftHip?.y ?? 0) - (rightHip?.y ?? 0)) * 100;
-  const wristHeight = average([(leftWrist?.y ?? 0), (rightWrist?.y ?? 0)]);
-  const beatTarget = danceBeat % 2 === 0 ? 0.32 : 0.55;
-  return {
-    ...finalize("dance", [
-      metric("Shoulder Level", scoreFromTarget(shoulderLevel, 0, 5), shoulderLevel > 6 ? "Level the shoulders for a cleaner frame." : "Shoulder line is clean."),
-      metric("Hip Level", scoreFromTarget(hipLevel, 0, 6), hipLevel > 7 ? "Square the hips forward." : "Hip line is stable."),
-      metric("Rhythm", scoreFromTarget(wristHeight, beatTarget, 0.14), "Match the cue timing with your arm line.", Number(wristHeight.toFixed(2)), "beat cue"),
-      metric("Stability", scoreFromTarget(Math.abs((leftWrist?.x ?? 0) - (rightWrist?.x ?? 0)) * 100, 55, 20), "Keep the dance frame open."),
-    ]),
-    targetCue: danceBeat % 2 === 0 ? "Open frame on the beat" : "Drop into the next groove",
-  };
+  return finalize("hold", [
+    metric("Control", 80, "Stay centered and keep moving with control."),
+    metric("Stability", 80, "Keep the movement organized from shoulders to hips."),
+    metric("Rhythm", 80, "Keep the timing even."),
+    metric("Safety", 80, "No major issues detected."),
+  ]);
 }

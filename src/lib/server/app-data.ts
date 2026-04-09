@@ -91,6 +91,8 @@ export async function ensureChatSession(userId: string) {
     id: nanoid(),
     userId,
     title: "FitCoach AI",
+    summary: null,
+    context: null,
     createdAt: new Date(),
     lastMessageAt: new Date(),
   };

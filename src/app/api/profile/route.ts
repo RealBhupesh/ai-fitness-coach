@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { userProfiles, users } from "@/db/schema";
 import { getAppProfile, toProfileDbInput } from "@/lib/server/app-data";
 import { requireServerSession } from "@/lib/auth/session";
+import { guardMutationRequest, getRequestIp } from "@/lib/security/request-guard";
 import { profileInputSchema } from "@/lib/validation/schemas";
 
 export async function GET() {
@@ -21,6 +22,16 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const session = await requireServerSession(request);
+    const guard = guardMutationRequest(request, {
+      bucket: "profile",
+      key: `${session.user.id}:${getRequestIp(request)}`,
+      limit: 20,
+      windowMs: 60_000,
+    });
+    if (guard) {
+      return guard;
+    }
+
     const parsed = profileInputSchema.safeParse(await request.json());
     if (!parsed.success) {
       return NextResponse.json({ error: "Invalid profile payload", details: parsed.error.flatten() }, { status: 400 });
