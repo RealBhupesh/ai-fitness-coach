@@ -11,11 +11,26 @@ type CameraFrame = {
 
 type PoseModelQuality = "full" | "lite";
 
-const WASM_ROOT = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm";
-const MODEL_ASSETS: Record<PoseModelQuality, string> = {
-  full: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task",
-  lite: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
-};
+function getWasmRoot() {
+  return "/mediapipe/wasm";
+}
+
+function getModelAssetPath(quality: PoseModelQuality) {
+  const filename = quality === "full" ? "pose_landmarker_full.task" : "pose_landmarker_lite.task";
+  return `/mediapipe/models/${filename}`;
+}
+
+function normalizePoseEngineError(error: unknown) {
+  const err = error as { message?: string };
+  const message = err?.message || "";
+  if (/fetch|load|network|cdn|wasm|modelAssetPath|storage\.googleapis|jsdelivr/i.test(message)) {
+    return new Error(`Pose model failed to load. ${message}`.trim());
+  }
+  if (/gpu/i.test(message)) {
+    return new Error(`The high-performance pose engine could not start on this device. ${message}`.trim());
+  }
+  return new Error(message ? `Pose engine failed to start. ${message}` : "Pose engine failed to start.");
+}
 
 function mapLandmarks(landmarks: Array<{ x: number; y: number; z?: number; visibility?: number }> | undefined) {
   return (landmarks ?? []).map((item) => ({
@@ -60,6 +75,7 @@ export function createPoseTrackingEngine(options: {
   let modelQuality: PoseModelQuality = "full";
   let reloading = false;
   let lowFpsFrames = 0;
+  let visionResolverPromise: ReturnType<typeof FilesetResolver.forVisionTasks> | null = null;
   const brightnessSampler = createBrightnessSampler();
 
   const emitTelemetry = (event: SessionTelemetryEvent) => {
@@ -67,23 +83,42 @@ export function createPoseTrackingEngine(options: {
   };
 
   const load = async (quality: PoseModelQuality) => {
-    const vision = await FilesetResolver.forVisionTasks(WASM_ROOT);
-    const next = await PoseLandmarker.createFromOptions(vision, {
-      baseOptions: {
-        modelAssetPath: MODEL_ASSETS[quality],
-        delegate: "GPU",
-      },
-      runningMode: "VIDEO",
-      numPoses: 1,
-      minPoseDetectionConfidence: 0.55,
-      minPosePresenceConfidence: 0.55,
-      minTrackingConfidence: 0.55,
-      outputSegmentationMasks: false,
-    });
+    try {
+      visionResolverPromise ??= FilesetResolver.forVisionTasks(getWasmRoot());
+      const vision = await visionResolverPromise;
+      let next: PoseLandmarker | null = null;
+      let lastError: unknown = null;
 
-    landmarker?.close();
-    landmarker = next;
-    modelQuality = quality;
+      for (const delegate of ["GPU", "CPU"] as const) {
+        try {
+          next = await PoseLandmarker.createFromOptions(vision, {
+            baseOptions: {
+              modelAssetPath: getModelAssetPath(quality),
+              delegate,
+            },
+            runningMode: "VIDEO",
+            numPoses: 1,
+            minPoseDetectionConfidence: 0.55,
+            minPosePresenceConfidence: 0.55,
+            minTrackingConfidence: 0.55,
+            outputSegmentationMasks: false,
+          });
+          break;
+        } catch (error) {
+          lastError = error;
+        }
+      }
+
+      if (!next) {
+        throw lastError;
+      }
+
+      landmarker?.close();
+      landmarker = next;
+      modelQuality = quality;
+    } catch (error) {
+      throw normalizePoseEngineError(error);
+    }
   };
 
   return {

@@ -4,12 +4,38 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { chatMessages, chatSessions } from "@/db/schema";
 import { requireServerSession } from "@/lib/auth/session";
-import { isDemoUser } from "@/lib/dummy-auth";
+import { buildDemoProfile, getDemoNutritionPlanFromCookie, getDemoProfileFromCookie, getDemoWorkoutPlanFromCookie, isDemoUser } from "@/lib/dummy-auth";
 import { generateCoachMessage } from "@/lib/ai/coach";
 import { chatInputSchema } from "@/lib/validation/schemas";
-import { ensureChatSession, getAppProfile } from "@/lib/server/app-data";
+import { ensureChatSession, getAppProfile, getDashboardSummary } from "@/lib/server/app-data";
 import { guardMutationRequest, getRequestIp } from "@/lib/security/request-guard";
 import { toJson } from "@/lib/utils/json";
+
+function buildFitnessContext(input: {
+  profileName?: string;
+  recentSessions?: Array<{ type: string; exerciseType?: string | null; duration: number; compositeScore: number; date: string }>;
+  activePlan?: { name: string; progress: number; currentWeek: number; daysPerWeek: number } | null;
+  activeNutritionPlan?: { name: string; dailyCalories: number; proteinGrams: number; carbsGrams: number; fatGrams: number } | null;
+}) {
+  const recentSessionsText =
+    input.recentSessions?.length
+      ? input.recentSessions
+          .slice(-3)
+          .map((session) => `${session.type}${session.exerciseType ? `/${session.exerciseType}` : ""} for ${session.duration} min, score ${session.compositeScore}, date ${session.date.slice(0, 10)}`)
+          .join("; ")
+      : "No recent logged sessions.";
+
+  return [
+    `Athlete: ${input.profileName ?? "Unknown"}`,
+    input.activePlan
+      ? `Active workout plan: ${input.activePlan.name}, progress ${input.activePlan.progress}%, week ${input.activePlan.currentWeek}, ${input.activePlan.daysPerWeek} days/week.`
+      : "Active workout plan: none.",
+    input.activeNutritionPlan
+      ? `Active nutrition plan: ${input.activeNutritionPlan.name}, ${input.activeNutritionPlan.dailyCalories} kcal, ${input.activeNutritionPlan.proteinGrams}g protein, ${input.activeNutritionPlan.carbsGrams}g carbs, ${input.activeNutritionPlan.fatGrams}g fat.`
+      : "Active nutrition plan: none.",
+    `Recent sessions: ${recentSessionsText}`,
+  ].join("\n");
+}
 
 export async function GET(request: Request) {
   try {
@@ -49,10 +75,36 @@ export async function POST(request: Request) {
 
     if (isDemoUser(session.user.id)) {
       const generated = await generateCoachMessage({
-        profile: null,
+        profile: getDemoProfileFromCookie(request.headers.get("cookie") || "") ?? buildDemoProfile(),
         recentMessages: [],
         sessionSummary: "Demo chat session",
-        sessionContext: "Demo mode (no persistence)",
+        sessionContext: buildFitnessContext({
+          profileName: (getDemoProfileFromCookie(request.headers.get("cookie") || "") ?? buildDemoProfile()).name,
+          activePlan: (() => {
+            const plan = getDemoWorkoutPlanFromCookie<Record<string, any>>(request.headers.get("cookie") || "");
+            return plan
+              ? {
+                  name: String(plan.name ?? "Demo workout plan"),
+                  progress: 0,
+                  currentWeek: 1,
+                  daysPerWeek: Number(plan.daysPerWeek ?? 0),
+                }
+              : null;
+          })(),
+          activeNutritionPlan: (() => {
+            const plan = getDemoNutritionPlanFromCookie<Record<string, any>>(request.headers.get("cookie") || "");
+            return plan
+              ? {
+                  name: String(plan.name ?? "Demo nutrition plan"),
+                  dailyCalories: Number(plan.dailyCalories ?? 0),
+                  proteinGrams: Number(plan.proteinGrams ?? 0),
+                  carbsGrams: Number(plan.carbsGrams ?? 0),
+                  fatGrams: Number(plan.fatGrams ?? 0),
+                }
+              : null;
+          })(),
+          recentSessions: [],
+        }),
         userMessage: parsed.data.message,
       });
 
@@ -64,8 +116,9 @@ export async function POST(request: Request) {
     }
 
     const currentChatSession = await ensureChatSession(session.user.id);
-    const [profile, recentMessages] = await Promise.all([
+    const [profile, dashboard, recentMessages] = await Promise.all([
       getAppProfile(session.user.id),
+      getDashboardSummary(session.user.id),
       db.query.chatMessages.findMany({
         where: eq(chatMessages.userId, session.user.id),
         orderBy: [desc(chatMessages.createdAt)],
@@ -80,7 +133,12 @@ export async function POST(request: Request) {
         content: message.content,
       })),
       sessionSummary: currentChatSession.summary ?? undefined,
-      sessionContext: currentChatSession.context ?? undefined,
+      sessionContext: [currentChatSession.context ?? "", buildFitnessContext({
+        profileName: profile?.name,
+        recentSessions: dashboard.recentSessions,
+        activePlan: dashboard.activePlan,
+        activeNutritionPlan: dashboard.activeNutritionPlan,
+      })].filter(Boolean).join("\n\n"),
       userMessage: parsed.data.message,
     });
 
@@ -130,6 +188,6 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     const status = error instanceof Error && error.message === "UNAUTHORIZED" ? 401 : 500;
-    return NextResponse.json({ error: status === 401 ? "Unauthorized" : "Failed to process chat request" }, { status });
+    return NextResponse.json({ error: status === 401 ? "Unauthorized" : error instanceof Error ? error.message : "Failed to process chat request" }, { status });
   }
 }

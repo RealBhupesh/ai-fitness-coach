@@ -3,17 +3,22 @@ import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/db";
 import { userProfiles, users } from "@/db/schema";
-import { getAppProfile, mapProfileToApp, toProfileDbInput } from "@/lib/server/app-data";
+import { getAppProfile, toProfileDbInput } from "@/lib/server/app-data";
 import { requireServerSession } from "@/lib/auth/session";
-import { isDemoUser, DEMO_USER } from "@/lib/dummy-auth";
+import { isDemoUser, DEMO_PROFILE_COOKIE_NAME, buildDemoProfile, getDemoProfileFromCookie, saveDemoProfile, clearDemoProfile } from "@/lib/dummy-auth";
 import { guardMutationRequest, getRequestIp } from "@/lib/security/request-guard";
 import { profileInputSchema } from "@/lib/validation/schemas";
 
-export async function GET() {
+function getCookieHeader(request?: Request) {
+  return request?.headers.get("cookie") || "";
+}
+
+export async function GET(request: Request) {
   try {
-    const session = await requireServerSession();
+    const session = await requireServerSession(request);
     if (isDemoUser(session.user.id)) {
-      return NextResponse.json({ profile: mapProfileToApp({ id: DEMO_USER.id, email: DEMO_USER.email, name: DEMO_USER.name }, null) });
+      const profile = getDemoProfileFromCookie(getCookieHeader(request)) ?? buildDemoProfile();
+      return NextResponse.json({ profile });
     }
     const profile = await getAppProfile(session.user.id);
 
@@ -43,7 +48,19 @@ export async function POST(request: Request) {
 
     const payload = parsed.data;
     if (isDemoUser(session.user.id)) {
-      return NextResponse.json({ message: "Profile updated (demo mode)", profile: mapProfileToApp({ id: DEMO_USER.id, email: DEMO_USER.email, name: payload.name || DEMO_USER.name }, null) });
+      const existingProfile = getDemoProfileFromCookie(getCookieHeader(request)) ?? buildDemoProfile();
+      const profile = saveDemoProfile({
+        ...existingProfile,
+        ...payload,
+        lastUpdated: new Date().toISOString(),
+      });
+      const response = NextResponse.json({ message: "Profile updated (demo mode)", profile });
+      response.cookies.set(DEMO_PROFILE_COOKIE_NAME, encodeURIComponent(JSON.stringify(profile)), {
+        path: "/",
+        maxAge: 60 * 60 * 24 * 30,
+        sameSite: "lax",
+      });
+      return response;
     }
     const profileData = toProfileDbInput(payload);
     const existing = await db.query.userProfiles.findFirst({
@@ -83,6 +100,16 @@ export async function POST(request: Request) {
 export async function DELETE(request: Request) {
   try {
     const session = await requireServerSession(request);
+    if (isDemoUser(session.user.id)) {
+      clearDemoProfile();
+      const response = NextResponse.json({ message: "Profile reset", profile: buildDemoProfile() });
+      response.cookies.set(DEMO_PROFILE_COOKIE_NAME, "", {
+        path: "/",
+        maxAge: 0,
+        sameSite: "lax",
+      });
+      return response;
+    }
     await db.delete(userProfiles).where(eq(userProfiles.userId, session.user.id));
     const profile = await getAppProfile(session.user.id);
     return NextResponse.json({ message: "Profile reset", profile });

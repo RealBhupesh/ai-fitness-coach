@@ -12,6 +12,11 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useUserProfile } from "@/hooks/useUserProfile";
+import { getDemoSession } from "@/lib/dummy-auth";
+
+const DEMO_USER_ID = "demo-user-001";
+const DEMO_NUTRITION_PLAN_STORAGE_KEY = "fitcoach_demo_nutrition_plan_v1";
 
 type NutritionPlanRecord = {
   id: string;
@@ -60,6 +65,7 @@ const parseJson = <T,>(raw: string | null | undefined, fallback: T): T => {
 };
 
 export default function NutritionPage() {
+  const { session } = useUserProfile();
   const [plan, setPlan] = useState<NutritionPlanRecord | null>(null);
   const [entries, setEntries] = useState<FoodEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -75,6 +81,8 @@ export default function NutritionPage() {
     portion: "",
   });
 
+  const isDemoMode = session?.user?.id === DEMO_USER_ID || (!!getDemoSession?.() && typeof window !== "undefined");
+
   const load = async () => {
     setLoading(true);
     try {
@@ -86,7 +94,12 @@ export default function NutritionPage() {
       const logData = await logRes.json();
       if (!planRes.ok) throw new Error(planData.error || "Failed to load nutrition");
       if (!logRes.ok) throw new Error(logData.error || "Failed to load food log");
-      setPlan(planData.plan ?? null);
+      if (!planData.plan && isDemoMode && typeof window !== "undefined") {
+        const raw = window.localStorage.getItem(DEMO_NUTRITION_PLAN_STORAGE_KEY);
+        setPlan(raw ? (JSON.parse(raw) as NutritionPlanRecord) : null);
+      } else {
+        setPlan(planData.plan ?? null);
+      }
       setEntries(logData.entries ?? []);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load nutrition");
@@ -97,7 +110,7 @@ export default function NutritionPage() {
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [isDemoMode, session?.user?.id]);
 
   const todaysEntries = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
@@ -131,8 +144,13 @@ export default function NutritionPage() {
       const response = await fetch("/api/nutrition/generate", { method: "POST" });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Failed to generate plan");
-      toast.success("Nutrition plan generated");
-      await load();
+      if (isDemoMode && data.record && typeof window !== "undefined") {
+        window.localStorage.setItem(DEMO_NUTRITION_PLAN_STORAGE_KEY, JSON.stringify(data.record));
+        setPlan(data.record);
+      } else {
+        await load();
+      }
+      toast.success(`Nutrition plan generated${data.provider ? ` via ${data.provider}` : ""}`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to generate plan");
     } finally {

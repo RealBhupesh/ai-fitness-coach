@@ -610,16 +610,23 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     try {
       const video = videoRef.current;
       if (!video) return;
-      if (!trackingEngineRef.current) trackingEngineRef.current = createPoseTrackingEngine({ onTelemetry: pushTelemetry });
-      await trackingEngineRef.current.init();
       if (!cameraControllerRef.current) {
         cameraControllerRef.current = createCameraController({
           video,
           preset: "desktop_hq",
           onFrame: async (frame) => {
-            const tracked = await trackingEngineRef.current?.processFrame(frame, exerciseIdRef.current);
-            setFps(Math.round(frame.fps));
-            handleTrackingFrame(tracked ?? null);
+            try {
+              const tracked = await trackingEngineRef.current?.processFrame(frame, exerciseIdRef.current);
+              setFps(Math.round(frame.fps));
+              handleTrackingFrame(tracked ?? null);
+            } catch (error) {
+              const message = error instanceof Error ? error.message : "Pose engine failed to start.";
+              pushTelemetry({ timestampMs: 0, type: "camera_start_failure", message });
+              showStatus(message, "warning", "system", "Camera may still be available, but pose analysis cannot start until the model loads.");
+              toast.error(message);
+              cameraControllerRef.current?.stop();
+              setCameraOn(false);
+            }
           },
           onDisconnect: () => {
             setCameraOn(false);
@@ -627,13 +634,16 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
           },
         });
       }
+      if (!trackingEngineRef.current) trackingEngineRef.current = createPoseTrackingEngine({ onTelemetry: pushTelemetry });
       const cameraInfo = await cameraControllerRef.current.start("desktop_hq");
       setCameraProfileLabel(cameraInfo.profile.label);
       setCameraOn(true);
       showStatus(`${cameraInfo.profile.label} active. Finish calibration before starting the session.`);
     } catch (error) {
-      pushTelemetry({ timestampMs: 0, type: "camera_start_failure", message: error instanceof Error ? error.message : "Failed to access camera" });
-      toast.error(error instanceof Error ? error.message : "Failed to access camera");
+      const message = error instanceof Error ? error.message : "Failed to access camera";
+      pushTelemetry({ timestampMs: 0, type: "camera_start_failure", message });
+      showStatus(message, "warning", "system", "If you already allowed access, another app may still be using the camera.");
+      toast.error(message);
     } finally {
       setLoading(false);
     }

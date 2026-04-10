@@ -123,6 +123,28 @@ export function createCameraController(options: CameraControllerOptions) {
     },
   });
 
+  const normalizeCameraError = (error: unknown) => {
+    const err = error as { name?: string; message?: string };
+    switch (err?.name) {
+      case "NotAllowedError":
+      case "PermissionDeniedError":
+        return new Error("Camera permission was blocked. Allow camera access in your browser and system settings, then try again.");
+      case "NotFoundError":
+      case "DevicesNotFoundError":
+        return new Error("No camera was found on this device.");
+      case "NotReadableError":
+      case "TrackStartError":
+        return new Error("Your camera is busy in another app. Close Zoom, Meet, Photo Booth, or other camera apps and try again.");
+      case "OverconstrainedError":
+      case "ConstraintNotSatisfiedError":
+        return new Error("This camera does not support the requested quality settings.");
+      case "SecurityError":
+        return new Error("Camera access is blocked by browser security settings. Open the app on localhost and allow camera permissions.");
+      default:
+        return new Error(err?.message || "Failed to access camera.");
+    }
+  };
+
   return {
     async start(nextPreset?: CameraPreset) {
       if (nextPreset) {
@@ -131,8 +153,40 @@ export function createCameraController(options: CameraControllerOptions) {
 
       stopScheduling();
       stopTracks();
+      if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+        throw new Error("This browser does not support camera access. Try Chrome, Edge, or Safari on localhost.");
+      }
 
-      stream = await navigator.mediaDevices.getUserMedia(buildConstraints());
+      const presetsToTry: CameraPreset[] = nextPreset
+        ? [nextPreset, "desktop_balanced", "desktop_low"]
+        : [profile.preset, "desktop_balanced", "desktop_low"];
+
+      let lastError: unknown = null;
+      for (const presetName of Array.from(new Set(presetsToTry))) {
+        profile = CAMERA_PROFILES[presetName];
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(buildConstraints());
+          break;
+        } catch (error) {
+          lastError = error;
+        }
+      }
+
+      if (!stream) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: true,
+          });
+        } catch (error) {
+          lastError = error;
+        }
+      }
+
+      if (!stream) {
+        throw normalizeCameraError(lastError);
+      }
+
       const track = stream.getVideoTracks()[0];
       track?.addEventListener("ended", () => {
         running = false;

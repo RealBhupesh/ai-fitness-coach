@@ -13,6 +13,11 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useUserProfile } from "@/hooks/useUserProfile";
+import { getDemoSession } from "@/lib/dummy-auth";
+
+const DEMO_USER_ID = "demo-user-001";
+const DEMO_WORKOUT_PLAN_STORAGE_KEY = "fitcoach_demo_workout_plan_v1";
 
 type WorkoutPlanRecord = {
   id: string;
@@ -43,7 +48,9 @@ const parseSchedule = (raw?: string | null): ScheduleDay[] => {
 };
 
 export default function WorkoutPlansPage() {
+  const { session } = useUserProfile();
   const [plans, setPlans] = useState<WorkoutPlanRecord[]>([]);
+  const [demoActivePlan, setDemoActivePlan] = useState<WorkoutPlanRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState(false);
@@ -55,13 +62,47 @@ export default function WorkoutPlansPage() {
     difficulty: "intermediate",
   });
 
+  const isDemoMode = session?.user?.id === DEMO_USER_ID || (!!getDemoSession?.() && typeof window !== "undefined");
+
+  useEffect(() => {
+    if (!isDemoMode || typeof window === "undefined") return;
+    const raw = window.localStorage.getItem(DEMO_WORKOUT_PLAN_STORAGE_KEY);
+    if (!raw) return;
+    try {
+      setDemoActivePlan(JSON.parse(raw) as WorkoutPlanRecord);
+    } catch {
+      setDemoActivePlan(null);
+    }
+  }, [isDemoMode]);
+
   const loadPlans = async () => {
     setLoading(true);
     try {
+      if (isDemoMode && typeof window !== "undefined") {
+        const raw = window.localStorage.getItem(DEMO_WORKOUT_PLAN_STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as WorkoutPlanRecord;
+          setDemoActivePlan(parsed);
+          setPlans([parsed]);
+        }
+      }
       const response = await fetch("/api/workout-plans", { cache: "no-store" });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Failed to load plans");
-      setPlans(data.plans ?? []);
+      const nextPlans = data.plans ?? [];
+      if (!nextPlans.length && isDemoMode && typeof window !== "undefined") {
+        const raw = window.localStorage.getItem(DEMO_WORKOUT_PLAN_STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as WorkoutPlanRecord;
+          setDemoActivePlan(parsed);
+          setPlans([parsed]);
+          return;
+        }
+      }
+      if (nextPlans.length) {
+        setDemoActivePlan(null);
+      }
+      setPlans(nextPlans);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load plans");
     } finally {
@@ -71,10 +112,10 @@ export default function WorkoutPlansPage() {
 
   useEffect(() => {
     void loadPlans();
-  }, []);
+  }, [isDemoMode, session?.user?.id]);
 
-  const activePlan = useMemo(() => plans.find((plan) => plan.isActive) ?? null, [plans]);
-  const archivedPlans = useMemo(() => plans.filter((plan) => !plan.isActive), [plans]);
+  const activePlan = useMemo(() => demoActivePlan ?? plans.find((plan) => plan.isActive) ?? null, [demoActivePlan, plans]);
+  const archivedPlans = useMemo(() => plans.filter((plan) => !plan.isActive && plan.id !== demoActivePlan?.id), [demoActivePlan?.id, plans]);
   const activeSchedule = useMemo(() => parseSchedule(activePlan?.weeklySchedule), [activePlan?.weeklySchedule]);
   const activeProgress = activePlan ? Math.min(100, Math.round(100 / Math.max(activePlan.duration, 1))) : 0;
 
@@ -111,8 +152,16 @@ export default function WorkoutPlansPage() {
       const response = await fetch("/api/workout-plans/generate", { method: "POST" });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Failed to generate plan");
-      toast.success("AI workout plan generated");
-      await loadPlans();
+      if (data.record) {
+        setDemoActivePlan(data.record);
+      }
+      if (isDemoMode && data.record && typeof window !== "undefined") {
+        window.localStorage.setItem(DEMO_WORKOUT_PLAN_STORAGE_KEY, JSON.stringify(data.record));
+        setPlans([data.record]);
+      } else {
+        await loadPlans();
+      }
+      toast.success(`AI workout plan generated${data.provider ? ` via ${data.provider}` : ""}`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to generate plan");
     } finally {

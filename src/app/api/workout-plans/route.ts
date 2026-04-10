@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { workoutPlans } from "@/db/schema";
 import { requireServerSession } from "@/lib/auth/session";
+import { DEMO_WORKOUT_PLAN_COOKIE_NAME, getDemoWorkoutPlanFromCookie, isDemoUser } from "@/lib/dummy-auth";
 import { guardMutationRequest, getRequestIp } from "@/lib/security/request-guard";
 import { workoutPlanCreateSchema } from "@/lib/validation/schemas";
 import { toJson } from "@/lib/utils/json";
@@ -12,6 +13,10 @@ import { buildFallbackWorkoutPlan } from "@/lib/server/app-data";
 export async function GET(request: Request) {
   try {
     const session = await requireServerSession(request);
+    if (isDemoUser(session.user.id)) {
+      const demoPlan = getDemoWorkoutPlanFromCookie<Record<string, unknown>>(request.headers.get("cookie") || "");
+      return NextResponse.json({ plans: demoPlan ? [demoPlan] : [] });
+    }
     const plans = await db.query.workoutPlans.findMany({
       where: eq(workoutPlans.userId, session.user.id),
       orderBy: [desc(workoutPlans.createdAt)],
@@ -66,6 +71,16 @@ export async function POST(request: Request) {
       isAiGenerated: false,
       createdAt: new Date(),
     };
+
+    if (isDemoUser(session.user.id)) {
+      const response = NextResponse.json({ plan: record });
+      response.cookies.set(DEMO_WORKOUT_PLAN_COOKIE_NAME, encodeURIComponent(JSON.stringify(record)), {
+        path: "/",
+        maxAge: 60 * 60 * 24 * 30,
+        sameSite: "lax",
+      });
+      return response;
+    }
 
     await db.insert(workoutPlans).values(record);
     return NextResponse.json({ plan: record });

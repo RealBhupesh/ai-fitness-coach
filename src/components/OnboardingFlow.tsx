@@ -44,9 +44,9 @@ export default function OnboardingFlow() {
   const toggleArrayValue = <T,>(arr: T[], v: T) =>
     arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v];
 
-  const onSubmit = () => {
+  const onSubmit = async () => {
     if (!name.trim()) return alert("Please enter your name");
-    updateProfile({
+    await updateProfile({
       name: name.trim(),
       age: age ? Number(age) : undefined,
       gender: (gender || undefined) as any,
@@ -58,6 +58,7 @@ export default function OnboardingFlow() {
       allergies: allergies || undefined,
     });
     router.push("/dashboard");
+    router.refresh();
   };
 
   return (
@@ -164,7 +165,7 @@ export default function OnboardingFlow() {
 
           <div className="flex justify-end gap-3">
             <Button variant="secondary" type="button" onClick={() => router.push("/dashboard")}>Skip</Button>
-            <Button onClick={onSubmit}>Save & Continue</Button>
+            <Button onClick={() => void onSubmit()}>Save & Continue</Button>
           </div>
         </CardContent>
       </Card>
