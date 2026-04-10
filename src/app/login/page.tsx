@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signIn, useSession } from "@/lib/auth/client";
+import { createDemoSession, getDemoSession } from "@/lib/dummy-auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -21,6 +22,10 @@ function LoginPageInner() {
 
   useEffect(() => {
     if (!isPending && sessionData?.user?.id) {
+      router.replace(searchParams.get("next") || "/dashboard");
+      return;
+    }
+    if (!isPending && !sessionData?.user?.id && getDemoSession()) {
       router.replace(searchParams.get("next") || "/dashboard");
     }
   }, [isPending, router, searchParams, sessionData?.user?.id]);
@@ -59,7 +64,7 @@ function LoginPageInner() {
           </div>
           <div className="text-center">
             <CardTitle className="text-2xl">Sign in to FitCoach AI</CardTitle>
-            <CardDescription>Use your account to continue into the dashboard and live coach.</CardDescription>
+            <CardDescription>Use your account or jump into demo mode to test the dashboard and live coach.</CardDescription>
           </div>
         </CardHeader>
         <CardContent>
@@ -77,6 +82,21 @@ function LoginPageInner() {
               {submitting ? "Signing in..." : "Sign in"}
             </Button>
           </form>
+          <div className="relative my-4">
+            <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-zinc-800" /></div>
+            <div className="relative flex justify-center text-xs uppercase"><span className="bg-zinc-950/80 px-2 text-zinc-500">or</span></div>
+          </div>
+          <Button
+            variant="outline"
+            className="w-full border-zinc-700 bg-zinc-900 text-zinc-100 hover:bg-zinc-800"
+            onClick={() => {
+              createDemoSession();
+              router.push(searchParams.get("next") || "/dashboard");
+              router.refresh();
+            }}
+          >
+            Continue as Demo User
+          </Button>
           <p className="mt-4 text-sm text-zinc-400">
             Don&apos;t have an account?{" "}
             <Link href="/signup" className="text-orange-400 hover:text-orange-300">

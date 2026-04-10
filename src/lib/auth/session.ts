@@ -2,6 +2,7 @@ import { getSessionCookie } from "better-auth/cookies";
 import { headers } from "next/headers";
 import { NextRequest } from "next/server";
 import { auth } from "@/lib/auth/config";
+import { hasDemoCookie, buildDemoServerSession } from "@/lib/dummy-auth";
 
 type RequestLike = NextRequest | Request | Headers | undefined;
 
@@ -20,9 +21,18 @@ function toHeaders(source?: RequestLike): Headers {
 
 export async function getServerSession(source?: RequestLike) {
   const requestHeaders = source ? toHeaders(source) : new Headers(await headers());
-  return auth.api.getSession({
-    headers: requestHeaders,
-  });
+
+  try {
+    const session = await auth.api.getSession({ headers: requestHeaders });
+    if (session?.user?.id) return session;
+  } catch {}
+
+  const cookieHeader = requestHeaders.get("cookie") || "";
+  if (hasDemoCookie(cookieHeader)) {
+    return buildDemoServerSession() as any;
+  }
+
+  return null;
 }
 
 export async function requireServerSession(source?: RequestLike) {

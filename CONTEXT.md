@@ -1,6 +1,6 @@
 # Project Context
 
-Last updated: 2026-04-08 (sync update completed on 2026-04-09)
+Last updated: 2026-04-09
 Purpose: persistent handoff context for future AI tools, LLMs, or developers working on this repo.
 
 ## What This Project Is
@@ -98,6 +98,11 @@ Reason:
 - Client auth helpers: `src/lib/auth/client.ts`
 - better-auth route handler: `src/app/api/auth/[...all]/route.ts`
 
+Important:
+- Demo auth is intentionally retained as a testing path.
+- `src/lib/dummy-auth.ts` is part of the supported auth surface and should not be deleted unless the product explicitly drops demo mode.
+- The app now expects real better-auth sessions for protected routes and protected writes.
+
 Identity and app data should no longer rely on localStorage.
 
 Allowed localStorage usage that remains:
@@ -156,6 +161,7 @@ Important:
 - `src/lib/env.ts`
 - `src/lib/security/request-guard.ts`
 - `src/lib/feedback/voice.ts`
+- `src/lib/feedback/state.ts`
 - `src/lib/dance/comparator.ts`
 - `src/lib/dance/routine-pack.ts`
 
@@ -164,6 +170,7 @@ These now handle:
 - trusted-origin parsing
 - in-memory request throttling for mutating APIs
 - dedicated browser speech feedback queueing
+- stable issue-signature feedback state and anti-spam cue decisions
 - packaged dance routine loading
 - dance phrase comparison
 
@@ -191,7 +198,7 @@ Validation:
 
 Write-path hardening added on 2026-04-09:
 - protected POST routes now require authenticated sessions
-- demo-mode write success paths were removed from workouts and coach feedback/summarize
+- authenticated sessions may be real better-auth sessions or the supported demo session
 - mutating routes now enforce trusted-origin checks plus in-memory rate limiting
 - `chat_sessions.summary` and `chat_sessions.context` are now actively included in chat prompt construction
 
@@ -229,12 +236,21 @@ Pose engine modules:
 - Scores live movement using modular exercise analyzers
 - Applies safety penalties and stop/warning cues
 - Counts reps for supported rep-based exercises
-- Periodically requests AI feedback from `/api/coach/feedback`
+- Requests AI feedback from `/api/coach/feedback` on meaningful state changes instead of a fixed timer-only loop
 - Persists completed sessions to `/api/workouts`
 - Requests a saved summary from `/api/coach/summarize`
 - Supports workout and dance modes
 - Pauses rep counting when tracking quality drops below the confidence gate
 - Uses a dedicated voice feedback controller instead of direct inline `speechSynthesis` calls
+- Uses a feedback-state engine so live cues only emit when the issue is stable, safety-critical, or novel enough to matter
+- Uses canonical phase tracking with hysteresis for bicep curls and squats so rep counting and live feedback share the same phase source
+- Marks low-confidence posture metrics as unreliable instead of converting noisy landmarks into fake corrections
+- Shows one primary cue plus an optional secondary note rather than rapidly rotating multiple warnings
+- Offers in-session camera controls:
+  - Landscape / Portrait layout toggle (switches between 16:9 and 3:4 aspect)
+  - Picture-in-Picture mode (draggable floating window with stop/expand/minimize)
+  - Minimized mode (camera keeps running off-screen, restore button in grid)
+  - All overlays (HUD, setup card, bottom bar) only render in full mode
 
 ### Supported exercise modes right now
 
@@ -359,15 +375,17 @@ Reason:
 
 ### Auth and API tightening
 
-- Removed all remaining dummy/demo auth flows from:
-  - `src/hooks/useUserProfile.ts`
+- Demo auth support is intentionally active through:
+  - `src/lib/dummy-auth.ts`
+  - `src/lib/auth/session.ts`
+  - `src/lib/auth/client.ts`
   - `src/middleware.ts`
   - `src/app/login/page.tsx`
   - `src/app/signup/page.tsx`
   - `src/components/layout/AppLayout.tsx`
-- Deleted `src/lib/dummy-auth.ts`.
-- Removed the remaining demo-mode success path from `POST /api/workouts`.
-- Removed unauthenticated fallback behavior from `POST /api/coach/feedback` and `POST /api/coach/summarize`.
+  - demo-aware API stubs such as `POST /api/workouts`, `GET/POST /api/profile`, `GET/POST /api/chat`, and `GET /api/dashboard`
+- Real authenticated flows remain the primary production path.
+- Unauthenticated fallback behavior is still removed for protected routes that are not demo-aware.
 - Added trusted-origin checks and in-memory rate limiting to mutating routes.
 - Chat session summary/context is now persisted and fed back into `generateCoachMessage()`.
 
@@ -393,6 +411,54 @@ Reason:
   - request guard behavior
 - Added Playwright config plus an auth-page smoke test.
 - Deleted the leftover `backend/` package directory entirely.
+
+### Accurate workout feedback hardening
+
+- Added `src/lib/feedback/state.ts` for issue-signature based cue stability and cooldown control.
+- Hardened `src/lib/pose/exercises.ts` with:
+  - canonical phase trackers for bicep curls and squats
+  - hysteresis and minimum dwell before phase transitions are accepted
+  - per-metric reliability gating so noisy wrists/legs do not drive corrections
+  - more specific curl cues for top finish, bottom extension, elbow path, shoulder shrug, torso swing, and wrist stack
+  - stronger squat cues for depth, torso stack, hip centering, symmetry, and shoulder level
+- Updated `src/components/PoseAnalyzer.tsx` so:
+  - live rule cues pass through a unified cue pipeline
+  - LLM coaching is triggered by issue changes, score drops, or rep milestones instead of a plain timer
+  - LLM lines act as a secondary refinement rather than replacing the primary live cue
+- Updated `src/lib/feedback/voice.ts` to dedupe by semantic issue signature and stretch repeat cooldowns for non-critical cues.
+- Added focused tests in:
+  - `src/lib/feedback/state.test.ts`
+  - `src/lib/pose/exercises.test.ts`
+
+### Best-in-class live stack upgrade
+
+- Replaced the old script-injected MediaPipe runtime with a dedicated browser tracking stack:
+  - `src/lib/camera/controller.ts`
+  - `src/lib/pose/tracking-engine.ts`
+  - `@mediapipe/tasks-vision`
+- Added richer tracking and camera contracts in:
+  - `src/lib/pose/types.ts`
+  - `src/lib/pose/quality.ts`
+  - `src/lib/pose/kinematics.ts`
+- Added persisted session-analysis support for:
+  - frame-quality stats
+  - issue history
+  - phase history
+  - telemetry
+  - post-set aggregates
+- Added deterministic replay + validation scaffolding:
+  - `src/lib/pose/replay.ts`
+  - `src/lib/pose/quality.test.ts`
+  - `src/lib/pose/session-buffer.test.ts`
+  - `src/lib/pose/replay.test.ts`
+  - `fixtures/live-stack/README.md`
+  - `docs/live-stack-validation.md`
+- Repaired `src/components/PoseAnalyzer.tsx` after it had been left in a compile-valid but runtime-broken state with no render path. The component now:
+  - renders the live coach UI again
+  - keeps camera-loop inputs in refs to avoid stale closure bugs
+  - shows calibration, tracking, scoring, dance sync, and post-session review panels
+  - supports full, PiP, and minimized camera modes
+- Updated `src/components/coach/SessionSetupCard.tsx` so session start is blocked until calibration is actually ready.
 
 ## Production/Build Issues Encountered And Resolved
 
@@ -456,13 +522,27 @@ These are important for future handoff because they consumed real debugging time
 - Problem: `chat_sessions.summary` and `chat_sessions.context` were being stored but not used by the chat prompt.
 - Fix: `POST /api/chat` now includes both fields in `generateCoachMessage()` and updates them after each exchange.
 
-13. Demo auth paths were still creating false-positive production behavior
-- Problem: login/signup/profile/middleware still supported dummy user flows even after the rest of the app was moved to authenticated DB-backed state.
-- Fix: removed dummy auth codepaths, deleted `src/lib/dummy-auth.ts`, and made protected writes strict-auth only.
+13. Demo auth direction changed during cleanup work
+- Problem: the repo temporarily documented demo auth as removed while parts of the code still depended on it for testing flows.
+- Fix: demo auth was kept intentionally. The app now treats `src/lib/dummy-auth.ts` as a supported testing path, and the login/signup/app-shell/docs were realigned to preserve it.
 
 14. Dance routine content was still effectively demo-only
 - Problem: dance route depended on seeded DB checkpoint JSON only.
 - Fix: added packaged routine assets under `public/routines`, added server-side routine-pack loading, and wired a comparator into the live dance flow.
+
+15. `PoseAnalyzer` became runtime-blank during the live-stack refactor
+- Problem: the component still built, but the tail of the file no longer returned any JSX. That would leave `/coach/workout` and `/coach/dance` effectively blank in the browser.
+- Fix: rebuilt the render path, restored the live coach UI, and moved camera-loop-sensitive values onto refs so the tracking callback does not freeze on stale React state.
+
+16. New validation tests initially failed because the fixtures were wrong, not because the runtime was wrong
+- Problem: the first low-light test used a body configuration that still failed framing before lighting, and the first replay test did not contain a full post-recovery rep cycle.
+- Fix: corrected the fixtures so they now validate the intended behaviors:
+  - low-light gating after valid framing
+  - rep counting resumes only after tracking recovery and a full valid cycle
+
+17. Playwright smoke could hang when port `3000` was already occupied
+- Problem: `playwright.config.ts` expected `localhost:3000`, but the spawned Next dev server would auto-shift to another port when `3000` was busy.
+- Fix: Playwright now uses an isolated default port (`3100`) and starts Next explicitly on that port.
 
 ## Verification Status
 
@@ -491,6 +571,11 @@ Verified on 2026-04-09:
 - `npm run build` passes after the PostgreSQL migration, auth tightening, request guards, packaged dance routine pipeline, voice controller extraction, and health/test scaffolding
 - `npm run test` passes
 - `npm run test:e2e` passes after installing the Playwright Chromium binary and relaxing the auth smoke test to assert visible page text instead of heading role semantics
+- `npm run test` passes after the accurate-workout-feedback implementation
+- `npm run build` passes after the accurate-workout-feedback implementation
+- `npm run test` passes after the camera controller, Pose Landmarker runtime, replay harness, and `PoseAnalyzer` UI repair
+- `npm run build` passes after the camera controller, Pose Landmarker runtime, replay harness, and `PoseAnalyzer` UI repair
+- `npm run test:e2e` passes after moving Playwright to an isolated default port and rerunning the auth smoke suite
 
 Not verified on 2026-04-09:
 - No live browser camera session was run in this environment, so the curl upgrade is build-verified and code-reviewed but not physically motion-tested here.
@@ -523,7 +608,8 @@ These are the main remaining operational or product follow-ups:
 
 3. Automated tests now exist and basic execution passed, but coverage is still intentionally light
 - Unit coverage currently focuses on pose math, dance comparison, and request-guard behavior.
-- Playwright currently covers auth-page smoke only, not full authenticated product flows.
+- Unit coverage now also includes frame-quality gating, replay-based rep-count stability, and session post-set buffering.
+- Playwright still covers auth-page smoke only, not full authenticated product flows.
 
 4. Middleware is cookie-presence based, not session-validation based
 - This was an intentional workaround for Edge runtime issues.
@@ -532,6 +618,7 @@ These are the main remaining operational or product follow-ups:
 5. Browser-level camera QA is still pending
 - Real camera validation was not executed here.
 - Curl and dance thresholds should still be tuned on actual device movement.
+- The replay harness now exists, but the internal benchmark set itself still needs real subject recordings captured into fixtures.
 
 6. In-memory rate limiting is process-local only
 - `src/lib/security/request-guard.ts` currently uses an in-memory store.
@@ -581,6 +668,7 @@ At minimum, update:
 
 The project is currently a production-buildable, authenticated Next.js fitness platform with:
 - DB-backed user profile and app state
+- an intentionally supported demo-auth path for testing without creating a real account
 - authenticated AI chat
 - PostgreSQL as the active data target
 - Groq/OpenAI-backed generated workout and nutrition plans with deterministic fallback

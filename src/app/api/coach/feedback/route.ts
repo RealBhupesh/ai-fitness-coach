@@ -23,7 +23,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid feedback payload", details: parsed.error.flatten() }, { status: 400 });
     }
 
-    const profile = await getAppProfile(session.user.id);
+    let profile = await getAppProfile(session.user.id).catch(() => null);
     const feedback = await generateCoachFeedback({
       profile,
       ...parsed.data,

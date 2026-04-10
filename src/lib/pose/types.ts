@@ -5,6 +5,10 @@ export type Landmark = {
   visibility?: number;
 };
 
+export type CameraView = "front" | "angled" | "side" | "unknown";
+export type CameraPreset = "desktop_hq" | "desktop_balanced" | "desktop_low";
+export type FrameQualityState = "ready" | "partial_body" | "wrong_angle" | "low_light" | "motion_blur" | "occluded" | "camera_lost" | "low_fps";
+
 export type ExerciseId =
   | "squat"
   | "pushup"
@@ -17,6 +21,114 @@ export type ExerciseId =
 
 export type MetricStatus = "excellent" | "good" | "warning" | "critical";
 
+export type CameraProfile = {
+  preset: CameraPreset;
+  label: string;
+  width: number;
+  height: number;
+  frameRate: number;
+  mirroredPreview: boolean;
+  facingMode: "user";
+};
+
+export type TrackingFrame = {
+  timestampMs: number;
+  frameIndex: number;
+  fps: number;
+  rawLandmarks: Landmark[];
+  smoothedLandmarks: Landmark[];
+  worldLandmarks: Landmark[];
+  avgVisibility: number;
+  posePresence: number;
+  trackingConfidence: number;
+  frameQuality: FrameQualityState;
+  frameQualityMessage: string;
+  view: CameraView;
+  viewMessage: string;
+  brightness: number;
+  motion: number;
+  reliability: Record<string, boolean>;
+  dominantSide: "left" | "right" | "both";
+};
+
+export type ExerciseViewPolicy = {
+  allowedViews: CameraView[];
+  prompt: string;
+  requireFloor?: boolean;
+  requireFullBody?: boolean;
+};
+
+export type ExerciseContract = {
+  id: ExerciseId;
+  label: string;
+  viewPolicy: ExerciseViewPolicy;
+  readinessRules: string[];
+  feedbackKeys: string[];
+};
+
+export type SessionTelemetryType =
+  | "camera_started"
+  | "camera_start_failure"
+  | "camera_disconnected"
+  | "calibration_blocked"
+  | "calibration_ready"
+  | "low_confidence_pause"
+  | "model_quality_downgrade"
+  | "cue_suppressed"
+  | "rep_counted"
+  | "rep_count_corrected";
+
+export type SessionTelemetryEvent = {
+  timestampMs: number;
+  type: SessionTelemetryType;
+  message: string;
+  meta?: Record<string, string | number | boolean | null>;
+};
+
+export type SessionFramePoint = {
+  timestampMs: number;
+  overall: number;
+  form: number;
+  rom: number;
+  tempo: number;
+  stability: number;
+  symmetry: number;
+  safety: number;
+  phase: string;
+  frameQuality: FrameQualityState;
+  issueSignature?: string;
+};
+
+export type SessionIssuePoint = {
+  timestampMs: number;
+  signature: string;
+  message: string;
+  severity: "critical" | "warning" | "info";
+};
+
+export type SessionPhasePoint = {
+  timestampMs: number;
+  phase: string;
+};
+
+export type SessionPostSetAnalysis = {
+  stabilityAverage: number;
+  asymmetryAverage: number;
+  tempoDrift: number;
+  fatigueDrop: number;
+  consistencyAverage: number;
+  recurringIssues: string[];
+};
+
+export type SessionAnalysisBuffer = {
+  frames: SessionFramePoint[];
+  issueHistory: SessionIssuePoint[];
+  phaseHistory: SessionPhasePoint[];
+  frameQualityStats: Record<FrameQualityState, number>;
+  telemetry: SessionTelemetryEvent[];
+  postSet: SessionPostSetAnalysis;
+};
+
 export type LiveMetric = {
   name: string;
   score: number;
@@ -24,6 +136,7 @@ export type LiveMetric = {
   value?: number;
   target?: string;
   status: MetricStatus;
+  reliable?: boolean;
 };
 
 export type SafetySeverity = "info" | "warning" | "critical";
@@ -42,6 +155,13 @@ export type ConfidenceStatus = {
   tooFar: boolean;
   tooClose: boolean;
   message: string;
+  frameQuality: FrameQualityState;
+  view: CameraView;
+  allowedViews: CameraView[];
+  brightness: number;
+  motion: number;
+  pauseTracking: boolean;
+  reasons: string[];
 };
 
 export type FrameAnalysis = {
@@ -61,8 +181,13 @@ export type FrameAnalysis = {
   corrections: string[];
   injuryRisks: string[];
   primaryFocus?: string;
+  primaryIssueKey?: string;
+  secondaryNote?: string;
   trackedSide?: "left" | "right" | "both";
   targetCue?: string;
+  unreliableMetrics?: string[];
+  frameQuality?: FrameQualityState;
+  view?: CameraView;
 };
 
 export type PoseExercise = {

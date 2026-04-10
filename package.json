@@ -23,6 +23,7 @@
         "@libsql/client": "^0.15.15",
         "@mediapipe/camera_utils": "^0.3.1675466862",
         "@mediapipe/pose": "^0.5.1675469404",
+        "@mediapipe/tasks-vision": "^0.10.34",
         "@number-flow/react": "^0.5.10",
         "@radix-ui/react-accordion": "^1.2.11",
         "@radix-ui/react-alert-dialog": "^1.1.14",

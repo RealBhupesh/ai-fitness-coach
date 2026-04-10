@@ -3,14 +3,18 @@ import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/db";
 import { userProfiles, users } from "@/db/schema";
-import { getAppProfile, toProfileDbInput } from "@/lib/server/app-data";
+import { getAppProfile, mapProfileToApp, toProfileDbInput } from "@/lib/server/app-data";
 import { requireServerSession } from "@/lib/auth/session";
+import { isDemoUser, DEMO_USER } from "@/lib/dummy-auth";
 import { guardMutationRequest, getRequestIp } from "@/lib/security/request-guard";
 import { profileInputSchema } from "@/lib/validation/schemas";
 
 export async function GET() {
   try {
     const session = await requireServerSession();
+    if (isDemoUser(session.user.id)) {
+      return NextResponse.json({ profile: mapProfileToApp({ id: DEMO_USER.id, email: DEMO_USER.email, name: DEMO_USER.name }, null) });
+    }
     const profile = await getAppProfile(session.user.id);
 
     return NextResponse.json({ profile });
@@ -38,6 +42,9 @@ export async function POST(request: Request) {
     }
 
     const payload = parsed.data;
+    if (isDemoUser(session.user.id)) {
+      return NextResponse.json({ message: "Profile updated (demo mode)", profile: mapProfileToApp({ id: DEMO_USER.id, email: DEMO_USER.email, name: payload.name || DEMO_USER.name }, null) });
+    }
     const profileData = toProfileDbInput(payload);
     const existing = await db.query.userProfiles.findFirst({
       where: eq(userProfiles.userId, session.user.id),

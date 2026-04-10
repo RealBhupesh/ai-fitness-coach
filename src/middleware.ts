@@ -13,7 +13,7 @@ const protectedPrefixes = [
   "/onboarding",
 ];
 
-const SESSION_COOKIE_NAMES = ["better-auth.session_token", "__Secure-better-auth.session_token"];
+const SESSION_COOKIE_NAMES = ["better-auth.session_token", "__Secure-better-auth.session_token", "fitcoach_demo"];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;

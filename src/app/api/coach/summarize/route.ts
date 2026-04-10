@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { workoutSessions } from "@/db/schema";
 import { requireServerSession } from "@/lib/auth/session";
+import { isDemoUser } from "@/lib/dummy-auth";
 import { generateSessionSummary } from "@/lib/ai/coach";
 import { getAppProfile } from "@/lib/server/app-data";
 import { guardMutationRequest, getRequestIp } from "@/lib/security/request-guard";
@@ -27,11 +28,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid summary payload", details: parsed.error.flatten() }, { status: 400 });
     }
 
-    const profile = await getAppProfile(session.user.id);
+    let profile = await getAppProfile(session.user.id).catch(() => null);
     let workoutText = "";
     let workoutId: string | null = null;
 
-    if (parsed.data.sessionId) {
+    if (parsed.data.sessionId && !isDemoUser(session.user.id)) {
       const workout = await db.query.workoutSessions.findFirst({
         where: eq(workoutSessions.id, parsed.data.sessionId),
       });
@@ -43,6 +44,11 @@ Duration: ${workout.duration ?? 0} minutes
 Calories: ${workout.caloriesBurned ?? 0}
 Composite score: ${workout.compositeScore ?? 0}
 Breakdown: ${workout.scoringBreakdown ?? "none"}
+Frame quality stats: ${workout.frameQualityStats ?? "none"}
+Issue history: ${workout.issueHistory ?? "none"}
+Phase history: ${workout.phaseHistory ?? "none"}
+Post-set analysis: ${workout.postSetAnalysis ?? "none"}
+Telemetry: ${workout.telemetry ?? "none"}
 Notes: ${workout.notes ?? "none"}`;
       }
     }
@@ -64,7 +70,7 @@ Top strengths: ${(parsed.data.topStrengths ?? []).join("; ") || "none"}`;
       exerciseType: parsed.data.exerciseType,
     });
 
-    if (workoutId) {
+    if (workoutId && !isDemoUser(session.user.id)) {
       await db
         .update(workoutSessions)
         .set({

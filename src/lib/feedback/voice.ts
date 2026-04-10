@@ -3,6 +3,7 @@ export type VoiceFeedbackPriority = "critical" | "warning" | "info";
 type VoiceQueueItem = {
   message: string;
   priority: VoiceFeedbackPriority;
+  signature: string;
 };
 
 const PRIORITY_WEIGHT: Record<VoiceFeedbackPriority, number> = {
@@ -22,6 +23,8 @@ export function createVoiceFeedbackController() {
   let speaking = false;
   let lastSpokenAt = 0;
   let lastMessage = "";
+  let lastSignature = "";
+  const lastSpokenBySignature: Record<string, number> = {};
   const queue: VoiceQueueItem[] = [];
 
   const speakNext = () => {
@@ -49,6 +52,8 @@ export function createVoiceFeedbackController() {
     window.speechSynthesis.speak(utterance);
     lastSpokenAt = Date.now();
     lastMessage = next.message;
+    lastSignature = next.signature;
+    lastSpokenBySignature[next.signature] = lastSpokenAt;
   };
 
   return {
@@ -63,13 +68,18 @@ export function createVoiceFeedbackController() {
         window.speechSynthesis.cancel();
       }
     },
-    speak(message: string, priority: VoiceFeedbackPriority) {
+    speak(message: string, priority: VoiceFeedbackPriority, signature?: string) {
       if (!enabled || !message) {
         return;
       }
 
       const now = Date.now();
+      const normalizedSignature = signature || message.trim().toLowerCase().replace(/\s+/g, " ");
+      const lastForSignature = lastSpokenBySignature[normalizedSignature] ?? 0;
       if (message === lastMessage && now - lastSpokenAt < 10_000) {
+        return;
+      }
+      if (normalizedSignature === lastSignature && now - lastForSignature < 12_000 && priority !== "critical") {
         return;
       }
 
@@ -77,14 +87,23 @@ export function createVoiceFeedbackController() {
       if (now - lastSpokenAt < cooldownMs && priority !== "critical") {
         return;
       }
+      if (now - lastForSignature < (priority === "warning" ? 12_000 : 16_000) && priority !== "critical") {
+        return;
+      }
+      if (queue.some((item) => item.signature === normalizedSignature)) {
+        return;
+      }
 
-      queue.push({ message, priority });
+      queue.push({ message, priority, signature: normalizedSignature });
       queue.sort((a, b) => PRIORITY_WEIGHT[b.priority] - PRIORITY_WEIGHT[a.priority]);
       speakNext();
     },
     stop() {
       queue.length = 0;
       speaking = false;
+      lastMessage = "";
+      lastSignature = "";
+      Object.keys(lastSpokenBySignature).forEach((key) => delete lastSpokenBySignature[key]);
       if (typeof window !== "undefined" && "speechSynthesis" in window) {
         window.speechSynthesis.cancel();
       }

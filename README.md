@@ -12,7 +12,7 @@ Production-oriented Next.js application for:
 - Next.js 15 + React 19 + TypeScript 5
 - Drizzle ORM + PostgreSQL
 - better-auth
-- MediaPipe Pose
+- MediaPipe Pose Landmarker Web Tasks
 - Groq as primary LLM provider
 - OpenAI as fallback LLM provider
 
@@ -23,6 +23,13 @@ Production-oriented Next.js application for:
 - Middleware only redirects based on session-cookie presence
 - Route handlers are the real auth boundary through `requireServerSession()`
 - Live coach runtime is centered in [src/components/PoseAnalyzer.tsx](/g:/@final%20year%20project/ai-fitness-dance-diet-coach-main/src/components/PoseAnalyzer.tsx)
+- The live runtime is split across:
+  - `src/lib/camera/controller.ts`
+  - `src/lib/pose/tracking-engine.ts`
+  - `src/lib/pose/quality.ts`
+  - `src/lib/pose/session-buffer.ts`
+  - `src/lib/pose/replay.ts`
+- A demo auth path is intentionally supported for testing via the login and signup screens
 
 ## Environment
 
@@ -75,6 +82,13 @@ npm run dev
 curl http://localhost:3000/api/health
 ```
 
+## Demo Mode
+
+- `/login` and `/signup` both include a `Continue as Demo User` action.
+- Demo mode sets a local cookie and localStorage marker instead of creating a real Better Auth session.
+- Protected pages still open normally because middleware and `getServerSession()` recognize the demo session.
+- Some write-heavy APIs return safe stubbed success responses in demo mode so you can test the UI flow without mutating the real database.
+
 ## Available Scripts
 
 ```bash
@@ -101,11 +115,22 @@ The server route `GET /api/dance/routine` prefers the packaged routine asset and
 
 Current automated coverage includes:
 - Vitest unit tests for pose math
+- Vitest unit tests for frame-quality gating
+- Vitest unit tests for session post-set buffering
+- Vitest replay coverage for pause/resume rep counting
 - Vitest unit tests for the dance comparator
 - Vitest unit tests for request-guard behavior
 - Playwright smoke coverage for login and signup rendering
 
+Playwright note:
+- the smoke suite now starts Next.js on an isolated default port (`3100`) so it does not hang when `3000` is already occupied locally
+
 Real-device camera QA is still required before calling the live coach fully release-ready.
+
+Replay and benchmark scaffolding now lives in:
+- `src/lib/pose/replay.ts`
+- `fixtures/live-stack/README.md`
+- `docs/live-stack-validation.md`
 
 ## Important Files
 
@@ -127,6 +152,8 @@ Read these first if you are taking over:
 - request origin checks and in-memory rate limiting are enabled on mutating APIs
 - chat session summary/context are now used in the AI prompt path
 - live coach voice feedback is handled through a dedicated controller
+- live camera/tracking now runs through a dedicated camera controller + Pose Landmarker engine instead of the old script-injected runtime
 - dance now uses a packaged routine asset plus segment comparison
+- replay harness and validation docs now exist for deterministic live-stack regression testing
 
 For deeper handoff history, use `CONTEXT.md`.

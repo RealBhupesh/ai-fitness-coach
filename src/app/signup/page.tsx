@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { signUp } from "@/lib/auth/client";
+import { createDemoSession } from "@/lib/dummy-auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -53,7 +54,7 @@ export default function SignupPage() {
           </div>
           <div className="text-center">
             <CardTitle className="text-2xl">Create your FitCoach AI account</CardTitle>
-            <CardDescription>Start with a real account so your plans, sessions, and progress stay synced.</CardDescription>
+            <CardDescription>Start with a real account or use demo mode to test the app without creating one.</CardDescription>
           </div>
         </CardHeader>
         <CardContent>
@@ -75,6 +76,21 @@ export default function SignupPage() {
               {submitting ? "Creating account..." : "Create account"}
             </Button>
           </form>
+          <div className="relative my-4">
+            <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-zinc-800" /></div>
+            <div className="relative flex justify-center text-xs uppercase"><span className="bg-zinc-950/80 px-2 text-zinc-500">or</span></div>
+          </div>
+          <Button
+            variant="outline"
+            className="w-full border-zinc-700 bg-zinc-900 text-zinc-100 hover:bg-zinc-800"
+            onClick={() => {
+              createDemoSession();
+              router.push("/dashboard");
+              router.refresh();
+            }}
+          >
+            Continue as Demo User
+          </Button>
           <p className="mt-4 text-sm text-zinc-400">
             Already have an account?{" "}
             <Link href="/login" className="text-orange-400 hover:text-orange-300">

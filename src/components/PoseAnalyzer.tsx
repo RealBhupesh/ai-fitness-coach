@@ -1,37 +1,51 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Camera, CameraOff, Mic, RotateCcw, Timer, Volume2, VolumeX, Waves, Zap } from "lucide-react";
+import { AlertTriangle, Camera, CameraOff, GripVertical, Maximize2, Mic, Minimize2, Monitor, RotateCcw, Smartphone, Timer, Volume2, VolumeX, Waves, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { SessionSetupCard } from "@/components/coach/SessionSetupCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { cn } from "@/lib/utils";
+import { createCameraController, getCameraProfile } from "@/lib/camera/controller";
 import { compareDanceFrame } from "@/lib/dance/comparator";
 import type { DanceComparison, DanceRoutinePack } from "@/lib/dance/types";
+import { advanceFeedbackState, buildIssueSignature, createFeedbackState, type FeedbackCue } from "@/lib/feedback/state";
 import { createVoiceFeedbackController } from "@/lib/feedback/voice";
 import { useUserProfile } from "@/hooks/useUserProfile";
-import { evaluateConfidence, smoothLandmarks } from "@/lib/pose/confidence";
-import { analyzeExercise, getPhaseForExercise, POSE_CONNECTIONS, POSE_EXERCISES } from "@/lib/pose/exercises";
+import { cn } from "@/lib/utils";
+import { evaluateConfidence } from "@/lib/pose/confidence";
+import { advancePhaseTracker, analyzeExercise, createPhaseTrackerState, EXERCISE_CONTRACTS, POSE_CONNECTIONS, POSE_EXERCISES } from "@/lib/pose/exercises";
 import { average } from "@/lib/pose/math";
 import { evaluateSafety } from "@/lib/pose/safety";
-import type { ExerciseId, FrameAnalysis, Landmark } from "@/lib/pose/types";
+import { createSessionAnalysisBuffer, finalizeSessionAnalysis, recordCue, recordFrame, recordTelemetry } from "@/lib/pose/session-buffer";
+import { createPoseTrackingEngine } from "@/lib/pose/tracking-engine";
+import type { ConfidenceStatus, ExerciseId, FrameAnalysis, Landmark, SessionAnalysisBuffer, SessionTelemetryEvent, TrackingFrame } from "@/lib/pose/types";
 
 type Props = { mode?: "workout" | "dance" };
-type FeedbackEvent = { timestamp: number; type: string; message: string; severity: "critical" | "warning" | "info"; source: "rule_engine" | "llm_coach" | "system" };
+
+type FeedbackEvent = {
+  timestamp: number;
+  type: string;
+  message: string;
+  severity: "critical" | "warning" | "info";
+  source: "rule_engine" | "llm_coach" | "system";
+};
+
 type TechniqueScorecard = {
   elbowPath: number;
   rangeOfMotion: number;
   tempoControl: number;
   torsoStability: number;
 };
+
 type TopMistake = {
   mistake: string;
   whyItHurtsPerformance: string;
   exactFix: string;
 };
+
 type CorrectiveBlock = {
   minuteRange: string;
   drill: string;
@@ -60,6 +74,23 @@ const IDS = {
   dance: ["dance_basic", "jumping_jack"] as ExerciseId[],
 };
 
+const EMPTY_CONFIDENCE = (exerciseId: ExerciseId): ConfidenceStatus => ({
+  ready: false,
+  avgVisibility: 0,
+  fullBodyVisible: false,
+  centered: false,
+  tooFar: false,
+  tooClose: false,
+  message: "Enable the camera to calibrate.",
+  frameQuality: "camera_lost",
+  view: "unknown",
+  allowedViews: EXERCISE_CONTRACTS[exerciseId].viewPolicy.allowedViews,
+  brightness: 0,
+  motion: 0,
+  pauseTracking: true,
+  reasons: [],
+});
+
 const EMPTY: FrameAnalysis = {
   form: 0,
   rom: 0,
@@ -82,17 +113,14 @@ const bar = (score: number) => (score >= 88 ? "from-emerald-500 to-green-400" : 
 const text = (score: number) => (score >= 88 ? "text-emerald-400" : score >= 72 ? "text-amber-400" : score >= 55 ? "text-orange-400" : "text-rose-400");
 
 function trackedSideLabel(side?: FrameAnalysis["trackedSide"]) {
-  if (side === "left") return "Left arm";
-  if (side === "right") return "Right arm";
-  if (side === "both") return "Both arms";
+  if (side === "left") return "Left side";
+  if (side === "right") return "Right side";
+  if (side === "both") return "Both sides";
   return "Body";
 }
 
 function normalizeDanceRoutine(raw: any): DanceRoutinePack | null {
-  if (!raw?.id || !raw?.name) {
-    return null;
-  }
-
+  if (!raw?.id || !raw?.name) return null;
   const checkpoints = Array.isArray(raw.checkpoints)
     ? raw.checkpoints
     : typeof raw.checkpoints === "string"
@@ -115,9 +143,7 @@ function normalizeDanceRoutine(raw: any): DanceRoutinePack | null {
     bpm: Number(raw.bpm ?? 96),
     audioUrl: typeof raw.audioUrl === "string" ? raw.audioUrl : typeof raw.musicUrl === "string" ? raw.musicUrl : "",
     thumbnailUrl: typeof raw.thumbnailUrl === "string" ? raw.thumbnailUrl : "",
-    checkpoints: checkpoints
-      .filter((item: any) => item && typeof item.timeMs === "number" && typeof item.cue === "string")
-      .sort((a: any, b: any) => a.timeMs - b.timeMs),
+    checkpoints: checkpoints.filter((item: any) => item && typeof item.timeMs === "number" && typeof item.cue === "string").sort((a: any, b: any) => a.timeMs - b.timeMs),
     segments: Array.isArray(raw.segments) ? raw.segments : [],
   };
 }
@@ -157,95 +183,20 @@ function scorecardLabels(exerciseId: ExerciseId) {
 }
 
 function selectLiveCue(exerciseId: ExerciseId, frame: FrameAnalysis, safety: ReturnType<typeof evaluateSafety>) {
-  if (safety.blocked || safety.severity === "critical") {
-    return { message: safety.messages[0], severity: "critical" as const, source: "rule_engine" as const };
-  }
-
-  if (exerciseId === "bicep_curl") {
-    const prefix = `${trackedSideLabel(frame.trackedSide)}: `;
-    if (frame.injuryRisks.length) {
-      return { message: `${prefix}${frame.injuryRisks[0]}`, severity: "warning" as const, source: "rule_engine" as const };
-    }
-    if (safety.severity === "warning" && safety.messages.length) {
-      return { message: `${prefix}${safety.messages[0]}`, severity: "warning" as const, source: "rule_engine" as const };
-    }
-    if (frame.corrections.length) {
-      return { message: `${prefix}${frame.corrections[0]}`, severity: "warning" as const, source: "rule_engine" as const };
-    }
-    if (frame.positives.length) {
-      return { message: `${prefix}${frame.positives[0]}`, severity: "info" as const, source: "system" as const };
-    }
-  }
-
-  if (exerciseId === "dance_basic") {
-    const prefix = "Dance frame: ";
-    if (frame.injuryRisks.length) {
-      return { message: `${prefix}${frame.injuryRisks[0]}`, severity: "warning" as const, source: "rule_engine" as const };
-    }
-    if (safety.severity === "warning" && safety.messages.length) {
-      return { message: `${prefix}${safety.messages[0]}`, severity: "warning" as const, source: "rule_engine" as const };
-    }
-    if (frame.corrections.length) {
-      return { message: `${prefix}${frame.corrections[0]}`, severity: "warning" as const, source: "rule_engine" as const };
-    }
-    if (frame.positives.length) {
-      return { message: `${prefix}${frame.positives[0]}`, severity: "info" as const, source: "system" as const };
-    }
-  }
-
-  if (safety.severity === "warning" && safety.messages.length) {
-    return { message: safety.messages[0], severity: "warning" as const, source: "rule_engine" as const };
-  }
-  if (frame.corrections.length) {
-    return { message: frame.corrections[0], severity: "warning" as const, source: "rule_engine" as const };
-  }
-  if (frame.primaryFocus) {
-    return { message: frame.primaryFocus, severity: "info" as const, source: "system" as const };
-  }
-  return { message: frame.targetCue || "Strong rep. Keep the rhythm.", severity: "info" as const, source: "system" as const };
-}
-
-declare global {
-  interface Window {
-    Pose?: any;
-    Camera?: any;
-  }
-}
-
-function loadScript(src: string) {
-  return new Promise<void>((resolve, reject) => {
-    if (typeof document === "undefined") {
-      reject(new Error("Document is not available"));
-      return;
-    }
-    const existing = document.querySelector(`script[src="${src}"]`) as HTMLScriptElement | null;
-    if (existing) {
-      if (existing.dataset.loaded === "true") {
-        resolve();
-        return;
-      }
-      existing.addEventListener("load", () => resolve(), { once: true });
-      existing.addEventListener("error", () => reject(new Error(`Failed to load ${src}`)), { once: true });
-      return;
-    }
-    const script = document.createElement("script");
-    script.src = src;
-    script.async = true;
-    script.onload = () => {
-      script.dataset.loaded = "true";
-      resolve();
-    };
-    script.onerror = () => reject(new Error(`Failed to load ${src}`));
-    document.head.appendChild(script);
+  const cue = (message: string, severity: FeedbackCue["severity"], source: FeedbackCue["source"], side?: string, secondaryNote?: string): FeedbackCue => ({
+    message,
+    severity,
+    source,
+    secondaryNote,
+    signature: buildIssueSignature({ severity, message, side, channel: exerciseId }),
   });
-}
 
-async function ensureMediapipeLoaded() {
-  await loadScript("https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js");
-  await loadScript("https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js");
-  if (typeof window === "undefined" || !window.Pose || !window.Camera) {
-    throw new Error("MediaPipe scripts did not initialize correctly.");
-  }
+  if (safety.blocked || safety.severity === "critical") return cue(safety.messages[0], "critical", "rule_engine", "body", frame.secondaryNote);
+  if (frame.injuryRisks.length) return cue(frame.injuryRisks[0], "warning", "rule_engine", frame.trackedSide, frame.secondaryNote);
+  if (safety.severity === "warning" && safety.messages.length) return cue(safety.messages[0], "warning", "rule_engine", frame.trackedSide, frame.secondaryNote);
+  if (frame.corrections.length) return cue(frame.corrections[0], "warning", "rule_engine", frame.trackedSide, frame.secondaryNote);
+  if (frame.positives.length) return cue(frame.positives[0], "info", "system", frame.trackedSide, frame.secondaryNote);
+  return cue(frame.primaryFocus || frame.targetCue || "Strong rep. Keep the rhythm.", "info", "system", frame.trackedSide, frame.secondaryNote);
 }
 
 function draw(canvas: HTMLCanvasElement | null, video: HTMLVideoElement | null, landmarks: Landmark[] | null, score: number, mirror: boolean) {
@@ -291,17 +242,17 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const overlayRef = useRef<HTMLCanvasElement | null>(null);
-  const poseRef = useRef<any>(null);
-  const cameraRef = useRef<any>(null);
-  const smoothedRef = useRef<Landmark[] | null>(null);
+  const cameraControllerRef = useRef<ReturnType<typeof createCameraController> | null>(null);
+  const trackingEngineRef = useRef<ReturnType<typeof createPoseTrackingEngine> | null>(null);
+  const trackingFrameRef = useRef<TrackingFrame | null>(null);
   const runningRef = useRef(false);
   const mirrorRef = useRef(true);
   const exerciseIdRef = useRef<ExerciseId>(exerciseId);
   const exerciseRef = useRef(exercise);
   const profileRef = useRef(profile);
-  const phaseRef = useRef("idle");
-  const phaseAtRef = useRef(0);
-  const sawBottomRef = useRef(false);
+  const confidenceRef = useRef<ConfidenceStatus>(EMPTY_CONFIDENCE(exerciseId));
+  const phaseTrackerRef = useRef(createPhaseTrackerState());
+  const feedbackStateRef = useRef(createFeedbackState());
   const lastRepAtRef = useRef(0);
   const startedAtRef = useRef(0);
   const repsRef = useRef(0);
@@ -310,18 +261,25 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   const eventsRef = useRef<FeedbackEvent[]>([]);
   const framesRef = useRef<FrameAnalysis[]>([]);
   const curveRef = useRef<number[]>([]);
+  const sessionBufferRef = useRef<SessionAnalysisBuffer>(createSessionAnalysisBuffer());
   const danceSegmentRef = useRef<Record<string, { label: string; scores: number[]; timing: number[]; transition: number[] }>>({});
   const lastCoachRef = useRef(0);
+  const lastCoachSignatureRef = useRef<string | null>(null);
+  const lastOverallRef = useRef(0);
+  const lastPauseReasonRef = useRef<string | null>(null);
   const savingRef = useRef(false);
-  const lastFeedbackRef = useRef("");
+  const pipDragRef = useRef<{ sx: number; sy: number; px: number; py: number } | null>(null);
+
+  const [cameraProfileLabel, setCameraProfileLabel] = useState(getCameraProfile("desktop_hq").label);
   const [cameraOn, setCameraOn] = useState(false);
   const [running, setRunning] = useState(false);
   const [loading, setLoading] = useState(false);
   const [mirror, setMirror] = useState(true);
   const [fps, setFps] = useState(0);
-  const [confidence, setConfidence] = useState({ ready: false, avgVisibility: 0, message: "Enable the camera to calibrate." });
+  const [confidence, setConfidence] = useState<ConfidenceStatus>(EMPTY_CONFIDENCE(exerciseId));
   const [analysis, setAnalysis] = useState<FrameAnalysis>(EMPTY);
   const [feedback, setFeedback] = useState("Enable the camera to calibrate.");
+  const [secondaryFeedback, setSecondaryFeedback] = useState("");
   const [coachLine, setCoachLine] = useState("");
   const [coachSource, setCoachSource] = useState<"llm" | "fallback" | "">("");
   const [summary, setSummary] = useState("");
@@ -335,33 +293,77 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   const [correctivePlan, setCorrectivePlan] = useState<CorrectiveBlock[]>([]);
   const [trackingPausedReason, setTrackingPausedReason] = useState<string | null>(null);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const [cameraLayout, setCameraLayout] = useState<"landscape" | "portrait">("landscape");
+  const [cameraViewMode, setCameraViewMode] = useState<"full" | "pip" | "minimized">("full");
+  const [pipPos, setPipPos] = useState({ x: 20, y: 80 });
   const [seconds, setSeconds] = useState(0);
   const [calories, setCalories] = useState(0);
+  const danceRoutineRef = useRef<DanceRoutinePack | null>(danceRoutine);
+  const analysisRef = useRef<FrameAnalysis>(analysis);
+  const feedbackRef = useRef(feedback);
+  const coachLineRef = useRef(coachLine);
+  const secondsRef = useRef(seconds);
+  const caloriesRef = useRef(calories);
 
-  const pushFeedback = (message: string, severity: FeedbackEvent["severity"], source: FeedbackEvent["source"]) => {
-    setFeedback(message);
-    if (message !== lastFeedbackRef.current) {
-      lastFeedbackRef.current = message;
-      eventsRef.current.push({ timestamp: Math.max(0, Date.now() - startedAtRef.current), type: severity === "critical" ? "stop" : "cue", message, severity, source });
-      voiceRef.current.speak(message, severity === "critical" ? "critical" : severity === "warning" ? "warning" : "info");
+  const pushTelemetry = (event: SessionTelemetryEvent) => {
+    recordTelemetry(sessionBufferRef.current, event);
+  };
+
+  const applyCue = (cue: FeedbackCue, options: { eventType?: FeedbackEvent["type"]; logEvent?: boolean; speak?: boolean } = {}) => {
+    setFeedback(cue.message);
+    setSecondaryFeedback(cue.secondaryNote ?? "");
+    if (options.logEvent) {
+      const timestamp = Math.max(0, Date.now() - startedAtRef.current);
+      eventsRef.current.push({
+        timestamp,
+        type: options.eventType ?? (cue.severity === "critical" ? "stop" : "cue"),
+        message: cue.message,
+        severity: cue.severity,
+        source: cue.source,
+      });
+      recordCue(sessionBufferRef.current, cue, timestamp);
+    }
+    if (options.speak) {
+      voiceRef.current.speak(cue.message, cue.severity === "critical" ? "critical" : cue.severity === "warning" ? "warning" : "info", cue.signature);
     }
   };
 
+  const showStatus = (message: string, severity: FeedbackEvent["severity"] = "info", source: FeedbackEvent["source"] = "system", secondaryNote = "") => {
+    applyCue(
+      {
+        message,
+        severity,
+        source,
+        secondaryNote,
+        signature: buildIssueSignature({ severity, message, channel: source, side: "body" }),
+      },
+      { logEvent: false, speak: false },
+    );
+  };
+
+  const emitCue = (cue: FeedbackCue, eventType: FeedbackEvent["type"] = "cue") => {
+    applyCue(cue, { eventType, logEvent: true, speak: true });
+  };
+
   const reset = () => {
-    phaseRef.current = "idle";
-    phaseAtRef.current = 0;
-    sawBottomRef.current = false;
+    phaseTrackerRef.current = createPhaseTrackerState();
+    feedbackStateRef.current = createFeedbackState();
     lastRepAtRef.current = 0;
     repsRef.current = 0;
     repDataRef.current = [];
     eventsRef.current = [];
     framesRef.current = [];
     curveRef.current = [];
+    sessionBufferRef.current = createSessionAnalysisBuffer();
     danceSegmentRef.current = {};
     lastCoachRef.current = 0;
+    lastCoachSignatureRef.current = null;
+    lastOverallRef.current = 0;
+    lastPauseReasonRef.current = null;
     savingRef.current = false;
-    lastFeedbackRef.current = "";
     setAnalysis(EMPTY);
+    setFeedback("Enable the camera to calibrate.");
+    setSecondaryFeedback("");
     setCoachLine("");
     setCoachSource("");
     setSummary("");
@@ -377,62 +379,66 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     setCalories(0);
   };
 
-  const maybeRep = (phase: string, frame: FrameAnalysis) => {
-    const currentId = exerciseIdRef.current;
-    const previous = phaseRef.current;
-    const now = Date.now();
-    if (!phaseAtRef.current) phaseAtRef.current = now;
-    if (phase === previous) return;
-    if (["squat", "pushup", "lunge"].includes(currentId) && phase === "bottom") {
-      sawBottomRef.current = true;
-    }
-    if (currentId === "bicep_curl" && phase === "top") {
-      sawBottomRef.current = true;
-    }
-    if (currentId === "jumping_jack" && phase === "open") {
-      sawBottomRef.current = true;
-    }
-    const done =
-      (["squat", "pushup", "lunge"].includes(currentId) && sawBottomRef.current && phase === "top") ||
-      (currentId === "bicep_curl" && sawBottomRef.current && phase === "bottom") ||
-      (currentId === "jumping_jack" && sawBottomRef.current && phase === "closed");
-    if (done) {
-      // Debounce noisy landmark transitions to avoid false positives.
-      if (now - lastRepAtRef.current < 450) {
-        phaseRef.current = phase;
-        phaseAtRef.current = now;
-        return;
-      }
-      sawBottomRef.current = false;
-      lastRepAtRef.current = now;
-      repsRef.current += 1;
-      repDataRef.current.push({
-        exerciseId: currentId,
-        repNumber: repsRef.current,
-        phase,
-        formScore: frame.form,
-        romScore: frame.rom,
-        tempoScore: frame.tempo,
-        safetyScore: frame.safety,
-        corrections: frame.issues.slice(0, 4),
-        durationMs: now - phaseAtRef.current,
-        timestamps: { startMs: Math.max(0, phaseAtRef.current - startedAtRef.current), endMs: Math.max(0, now - startedAtRef.current) },
-      });
-      setFeedback(`Rep ${repsRef.current} counted. ${frame.corrections[0] ?? frame.positives[0] ?? "Keep moving with control."}`);
-    }
-    phaseRef.current = phase;
-    phaseAtRef.current = now;
+  const onPipPointerDown = (event: React.PointerEvent) => {
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    pipDragRef.current = { sx: event.clientX, sy: event.clientY, px: pipPos.x, py: pipPos.y };
   };
 
-  const maybeCoach = async (frame: FrameAnalysis) => {
-    const interval =
-      exerciseIdRef.current === "bicep_curl"
-        ? 5000
-        : exerciseIdRef.current === "dance_basic"
-          ? 6000
-          : 12000;
-    if (!runningRef.current || Date.now() - lastCoachRef.current < interval) return;
-    lastCoachRef.current = Date.now();
+  const onPipPointerMove = (event: React.PointerEvent) => {
+    const drag = pipDragRef.current;
+    if (!drag) return;
+    setPipPos({ x: Math.max(0, drag.px + (event.clientX - drag.sx)), y: Math.max(0, drag.py + (event.clientY - drag.sy)) });
+  };
+
+  const onPipPointerUp = () => {
+    pipDragRef.current = null;
+  };
+
+  const maybeRep = (phaseUpdate: ReturnType<typeof advancePhaseTracker>, previousPhaseState: ReturnType<typeof createPhaseTrackerState>, frame: FrameAnalysis, now: number) => {
+    if (!phaseUpdate.repCompleted || now - lastRepAtRef.current < 450) return;
+    lastRepAtRef.current = now;
+    repsRef.current += 1;
+    repDataRef.current.push({
+      exerciseId: exerciseIdRef.current,
+      repNumber: repsRef.current,
+      phase: phaseUpdate.phase,
+      formScore: frame.form,
+      romScore: frame.rom,
+      tempoScore: frame.tempo,
+      safetyScore: frame.safety,
+      corrections: frame.corrections.slice(0, 4),
+      durationMs: Math.max(0, now - previousPhaseState.cycleStartedAt),
+      timestamps: {
+        startMs: Math.max(0, previousPhaseState.cycleStartedAt - startedAtRef.current),
+        endMs: Math.max(0, now - startedAtRef.current),
+      },
+    });
+    pushTelemetry({
+      timestampMs: Math.max(0, now - startedAtRef.current),
+      type: "rep_counted",
+      message: `Rep ${repsRef.current} counted.`,
+      meta: { phase: phaseUpdate.phase, overall: frame.overall },
+    });
+    emitCue(
+      {
+        message: `Rep ${repsRef.current} counted. ${frame.corrections[0] ?? frame.positives[0] ?? "Keep moving with control."}`,
+        severity: "info",
+        source: "system",
+        secondaryNote: frame.secondaryNote,
+        signature: buildIssueSignature({ severity: "info", message: `rep_${repsRef.current}_${exerciseIdRef.current}`, side: exerciseIdRef.current, channel: "rep" }),
+      },
+      "cue",
+    );
+  };
+
+  const maybeCoach = async (frame: FrameAnalysis, cue: FeedbackCue, triggerReason: "issue_changed" | "score_drop" | "phase_milestone" | null) => {
+    if (!runningRef.current || !triggerReason) return;
+    const now = Date.now();
+    const interval = exerciseIdRef.current === "bicep_curl" ? 8_000 : exerciseIdRef.current === "squat" ? 8_500 : exerciseIdRef.current === "dance_basic" ? 7_500 : 12_000;
+    if (now - lastCoachRef.current < interval) return;
+    if (triggerReason === "issue_changed" && lastCoachSignatureRef.current === cue.signature && now - lastCoachRef.current < 15_000) return;
+    lastCoachRef.current = now;
+    lastCoachSignatureRef.current = cue.signature;
     try {
       const response = await fetch("/api/coach/feedback", {
         method: "POST",
@@ -441,94 +447,128 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
           exerciseType: exerciseIdRef.current,
           repsSoFar: repsRef.current,
           phase: frame.phase,
-          confidence: confidence.avgVisibility,
+          confidence: confidenceRef.current.avgVisibility,
+          issueSignature: cue.signature,
+          triggerReason,
           currentIssues: [...frame.injuryRisks, ...frame.corrections, ...frame.issues].slice(0, 6),
-          currentMetrics: frame.metrics.slice(0, 8).map((metric) => ({
-            name: metric.name,
-            score: metric.score,
-            detail: metric.detail,
-            value: metric.value,
-            target: metric.target,
-          })),
+          currentMetrics: frame.metrics.slice(0, 8).map((metric) => ({ name: metric.name, score: metric.score, detail: metric.detail, value: metric.value, target: metric.target })),
           recentScores: repDataRef.current.slice(-5).map((rep: any) => ({ form: rep.formScore, rom: rep.romScore, tempo: rep.tempoScore, safety: rep.safetyScore })),
         }),
       });
       const data = await parseApiResponse(response);
-      if (response.ok && data.feedback) {
+      if (response.ok && data?.feedback) {
         setCoachLine(data.feedback);
         setCoachSource(data.provider === "groq" || data.provider === "openai" ? "llm" : "fallback");
-        pushFeedback(data.feedback, "info", "llm_coach");
       } else if (!response.ok && (frame.corrections.length || frame.injuryRisks.length || frame.issues.length)) {
-        // Demo/auth-not-configured fallback: still provide actionable advice.
-        const fallback = frame.injuryRisks[0] ?? frame.corrections[0] ?? frame.issues[0];
-        setCoachLine(fallback);
+        setCoachLine(frame.injuryRisks[0] ?? frame.corrections[0] ?? frame.issues[0]);
         setCoachSource("fallback");
-        pushFeedback(fallback, "warning", "rule_engine");
       }
     } catch {}
   };
 
-  const handleLandmarks = (landmarks: Landmark[] | null) => {
+  const handleTrackingFrame = (trackingFrame: TrackingFrame | null) => {
     const currentId = exerciseIdRef.current;
     const currentExercise = exerciseRef.current;
-    draw(overlayRef.current, videoRef.current, landmarks, analysis.overall, mirrorRef.current);
-    if (!landmarks?.length) {
-      setConfidence({ ready: false, avgVisibility: 0, message: "Camera lost. Step back into frame." });
+    draw(overlayRef.current, videoRef.current, trackingFrame?.smoothedLandmarks ?? null, analysisRef.current.overall, mirrorRef.current);
+
+    if (!trackingFrame?.smoothedLandmarks?.length) {
+      const lost = { ...EMPTY_CONFIDENCE(currentId), message: "Camera lost. Step back into frame.", reasons: ["Camera lost. Step back into frame."] };
+      setConfidence(lost);
+      confidenceRef.current = lost;
+      feedbackStateRef.current = createFeedbackState();
       setTrackingPausedReason(runningRef.current ? "Camera lost. Scoring is paused until you are fully back in frame." : null);
-      if (runningRef.current) pushFeedback("Camera lost. Step back into frame.", "warning", "system");
+      if (runningRef.current && lastPauseReasonRef.current !== lost.message) {
+        pushTelemetry({ timestampMs: Math.max(0, Date.now() - startedAtRef.current), type: "camera_disconnected", message: lost.message });
+        emitCue(
+          {
+            message: lost.message,
+            severity: "warning",
+            source: "system",
+            secondaryNote: "Scoring is paused until your body is fully visible again.",
+            signature: buildIssueSignature({ severity: "warning", message: lost.message, channel: "system", side: "body" }),
+          },
+          "cue",
+        );
+        lastPauseReasonRef.current = lost.message;
+      } else if (!runningRef.current) {
+        showStatus(lost.message);
+      }
       return;
     }
-    const smoothed = smoothLandmarks(smoothedRef.current, landmarks);
-    smoothedRef.current = smoothed;
-    const gate = evaluateConfidence(smoothed, currentId);
+
+    trackingFrameRef.current = trackingFrame;
+    setFps(Math.round(trackingFrame.fps));
+    const gate = evaluateConfidence(trackingFrame, currentId);
     setConfidence(gate);
+    confidenceRef.current = gate;
+
     if (!runningRef.current) {
-      setFeedback(gate.message);
+      showStatus(gate.message);
       setTrackingPausedReason(null);
-      draw(overlayRef.current, videoRef.current, smoothed, 80, mirrorRef.current);
+      draw(overlayRef.current, videoRef.current, trackingFrame.smoothedLandmarks, 80, mirrorRef.current);
       return;
     }
-    const shouldPauseScoring = !gate.ready || gate.avgVisibility < 0.55;
-    setTrackingPausedReason(shouldPauseScoring ? `${gate.message}. Rep counting is paused until tracking recovers.` : null);
-    if (!gate.ready) {
-      pushFeedback(gate.message, "warning", "system");
-      // Keep analysis active on imperfect framing unless confidence is extremely low.
+
+    const shouldPauseScoring = gate.pauseTracking || !gate.ready || gate.avgVisibility < 0.55;
+    const pauseReason = shouldPauseScoring ? `${gate.message} Rep counting is paused until tracking recovers.` : null;
+    setTrackingPausedReason(pauseReason);
+    if (shouldPauseScoring) {
+      if (lastPauseReasonRef.current !== pauseReason) {
+        pushTelemetry({
+          timestampMs: Math.max(0, Date.now() - startedAtRef.current),
+          type: "low_confidence_pause",
+          message: pauseReason ?? gate.message,
+          meta: { frameQuality: trackingFrame.frameQuality, view: trackingFrame.view, fps: trackingFrame.fps, brightness: trackingFrame.brightness },
+        });
+        emitCue(
+          {
+            message: gate.message,
+            severity: "warning",
+            source: "system",
+            secondaryNote: "Tracking has to recover before rep counting resumes.",
+            signature: buildIssueSignature({ severity: "warning", message: gate.message, channel: "system", side: "body" }),
+          },
+          "cue",
+        );
+        lastPauseReasonRef.current = pauseReason;
+      }
+      feedbackStateRef.current = createFeedbackState();
       if (gate.avgVisibility < 0.35) return;
+    } else {
+      lastPauseReasonRef.current = null;
     }
-    if (!smoothed.length) {
-      return;
-    }
-    const elapsedMs = Math.max(0, Date.now() - startedAtRef.current);
-    const activeDanceCheckpoint = currentId === "dance_basic" ? getActiveDanceCheckpoint(danceRoutine, elapsedMs) : null;
-    const frame = analyzeExercise(
-      currentId,
-      smoothed,
-      activeDanceCheckpoint?.index ?? Math.floor(elapsedMs / 4000),
-      activeDanceCheckpoint?.step.cue,
-    );
-    const safety = evaluateSafety(currentId, smoothed, [...(profileRef.current?.injuries ?? []), ...(profileRef.current?.painPoints ?? [])]);
-    const resolved = { ...frame, safety: Math.max(0, frame.safety - (safety.severity === "critical" ? 35 : safety.severity === "warning" ? 12 : 0)), overall: Math.max(0, frame.overall - (safety.severity === "critical" ? 25 : safety.severity === "warning" ? 10 : 0)) };
+
+    const now = Date.now();
+    const elapsedMs = Math.max(0, now - startedAtRef.current);
+    const activeDanceCheckpoint = currentId === "dance_basic" ? getActiveDanceCheckpoint(danceRoutineRef.current, elapsedMs) : null;
+    const previousPhaseState = phaseTrackerRef.current;
+    const phaseUpdate = shouldPauseScoring
+      ? { state: previousPhaseState, phase: previousPhaseState.phase, rawPhase: previousPhaseState.rawPhase, phaseChanged: false, repCompleted: false, milestone: null }
+      : advancePhaseTracker(currentId, trackingFrame, previousPhaseState, now);
+    phaseTrackerRef.current = phaseUpdate.state;
+
+    const frame = analyzeExercise(currentId, trackingFrame, activeDanceCheckpoint?.index ?? Math.floor(elapsedMs / 4000), activeDanceCheckpoint?.step.cue, phaseUpdate.phase !== "idle" ? phaseUpdate.phase : undefined);
+    const safety = evaluateSafety(currentId, trackingFrame.smoothedLandmarks, [...(profileRef.current?.injuries ?? []), ...(profileRef.current?.painPoints ?? [])]);
+    const resolved: FrameAnalysis = {
+      ...frame,
+      safety: Math.max(0, frame.safety - (safety.severity === "critical" ? 35 : safety.severity === "warning" ? 12 : 0)),
+      overall: Math.max(0, frame.overall - (safety.severity === "critical" ? 25 : safety.severity === "warning" ? 10 : 0)),
+      frameQuality: trackingFrame.frameQuality,
+      view: trackingFrame.view,
+    };
+
     framesRef.current.push(resolved);
     if (framesRef.current.length % 15 === 0) curveRef.current.push(resolved.overall);
-    if (!shouldPauseScoring) {
-      maybeRep(getPhaseForExercise(currentId, smoothed), resolved);
-    }
+    recordFrame(sessionBufferRef.current, trackingFrame, resolved);
+    if (!shouldPauseScoring) maybeRep(phaseUpdate, previousPhaseState, resolved, now);
     setAnalysis(resolved);
-    if (currentId === "dance_basic" && danceRoutine?.segments?.length) {
-      const comparison = compareDanceFrame({
-        landmarks: smoothed,
-        routine: danceRoutine,
-        elapsedMs,
-        analysis: resolved,
-      });
+    analysisRef.current = resolved;
+
+    if (currentId === "dance_basic" && danceRoutineRef.current?.segments?.length) {
+      const comparison = compareDanceFrame({ landmarks: trackingFrame.smoothedLandmarks, routine: danceRoutineRef.current, elapsedMs, analysis: resolved });
       setDanceComparison(comparison);
       if (comparison) {
-        const bucket = danceSegmentRef.current[comparison.segment.id] ?? {
-          label: comparison.segment.label,
-          scores: [],
-          timing: [],
-          transition: [],
-        };
+        const bucket = danceSegmentRef.current[comparison.segment.id] ?? { label: comparison.segment.label, scores: [], timing: [], transition: [] };
         bucket.scores.push(comparison.overall);
         bucket.timing.push(comparison.timingScore);
         bucket.transition.push(comparison.transitionQuality);
@@ -537,40 +577,62 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     } else {
       setDanceComparison(null);
     }
-    setSeconds(Math.max(1, Math.floor((Date.now() - startedAtRef.current) / 1000)));
-    setCalories(Math.round((Math.max(1, Math.floor((Date.now() - startedAtRef.current) / 1000)) / 60) * (currentExercise.category === "dance" || currentExercise.id === "jumping_jack" ? 8.5 : 6.5)));
-    draw(overlayRef.current, videoRef.current, smoothed, resolved.overall, mirrorRef.current);
+
+    const elapsedSeconds = Math.max(1, Math.floor((now - startedAtRef.current) / 1000));
+    setSeconds(elapsedSeconds);
+    secondsRef.current = elapsedSeconds;
+    const estimatedCalories = Math.round((elapsedSeconds / 60) * (currentExercise.category === "dance" || currentExercise.id === "jumping_jack" ? 8.5 : 6.5));
+    setCalories(estimatedCalories);
+    caloriesRef.current = estimatedCalories;
+    draw(overlayRef.current, videoRef.current, trackingFrame.smoothedLandmarks, resolved.overall, mirrorRef.current);
+
     const liveCue = selectLiveCue(currentId, resolved, safety);
-    pushFeedback(liveCue.message, liveCue.severity, liveCue.source);
-    if (!shouldPauseScoring) {
-      void maybeCoach(resolved);
-    }
+    const cueDecision = advanceFeedbackState(feedbackStateRef.current, shouldPauseScoring ? null : liveCue, { now, confidence: trackingFrame.trackingConfidence });
+    feedbackStateRef.current = cueDecision.nextState;
+    if (cueDecision.shouldEmit) emitCue(liveCue);
+
+    const majorScoreDrop = lastOverallRef.current - resolved.overall >= 12;
+    const llmTrigger =
+      cueDecision.shouldEmit && cueDecision.reason === "changed_stable" && liveCue.severity !== "info"
+        ? "issue_changed"
+        : majorScoreDrop && gate.avgVisibility >= 0.72
+          ? "score_drop"
+          : phaseUpdate.milestone === "complete" && repsRef.current > 0 && repsRef.current % 3 === 0
+            ? "phase_milestone"
+            : null;
+    if (!shouldPauseScoring) void maybeCoach(resolved, liveCue, llmTrigger);
+    lastOverallRef.current = resolved.overall;
   };
 
   const startCamera = async () => {
     if (cameraOn) return;
     setLoading(true);
     try {
-      await ensureMediapipeLoaded();
       const video = videoRef.current;
       if (!video) return;
-      const pose = new window.Pose({ locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
-      // Keep pose coordinates in camera space and control mirroring in UI/canvas only.
-      pose.setOptions({ modelComplexity: 1, smoothLandmarks: true, enableSegmentation: false, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6, selfieMode: false });
-      let last = performance.now();
-      pose.onResults((results: any) => {
-        const now = performance.now();
-        setFps(Math.round(1000 / Math.max(now - last, 1)));
-        last = now;
-        handleLandmarks((results.poseLandmarks as Landmark[] | undefined) ?? null);
-      });
-      const camera = new window.Camera(video, { onFrame: async () => pose.send({ image: video }), width: 1280, height: 720 });
-      await camera.start();
-      poseRef.current = pose;
-      cameraRef.current = camera;
+      if (!trackingEngineRef.current) trackingEngineRef.current = createPoseTrackingEngine({ onTelemetry: pushTelemetry });
+      await trackingEngineRef.current.init();
+      if (!cameraControllerRef.current) {
+        cameraControllerRef.current = createCameraController({
+          video,
+          preset: "desktop_hq",
+          onFrame: async (frame) => {
+            const tracked = await trackingEngineRef.current?.processFrame(frame, exerciseIdRef.current);
+            setFps(Math.round(frame.fps));
+            handleTrackingFrame(tracked ?? null);
+          },
+          onDisconnect: () => {
+            setCameraOn(false);
+            handleTrackingFrame(null);
+          },
+        });
+      }
+      const cameraInfo = await cameraControllerRef.current.start("desktop_hq");
+      setCameraProfileLabel(cameraInfo.profile.label);
       setCameraOn(true);
-      setFeedback("Camera active. Finish calibration before starting the session.");
+      showStatus(`${cameraInfo.profile.label} active. Finish calibration before starting the session.`);
     } catch (error) {
+      pushTelemetry({ timestampMs: 0, type: "camera_start_failure", message: error instanceof Error ? error.message : "Failed to access camera" });
       toast.error(error instanceof Error ? error.message : "Failed to access camera");
     } finally {
       setLoading(false);
@@ -579,33 +641,47 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
 
   const stopCamera = () => {
     try {
-      cameraRef.current?.stop?.();
-      poseRef.current?.close?.();
+      cameraControllerRef.current?.stop();
+      void trackingEngineRef.current?.stop();
     } catch {}
-    cameraRef.current = null;
-    poseRef.current = null;
-    smoothedRef.current = null;
+    trackingFrameRef.current = null;
     runningRef.current = false;
     setCameraOn(false);
     setRunning(false);
-    setConfidence({ ready: false, avgVisibility: 0, message: "Enable the camera to calibrate." });
+    setCameraViewMode("full");
+    const idleConfidence = EMPTY_CONFIDENCE(exerciseIdRef.current);
+    setConfidence(idleConfidence);
+    confidenceRef.current = idleConfidence;
+    feedbackStateRef.current = createFeedbackState();
     setAnalysis(EMPTY);
-    draw(overlayRef.current, videoRef.current, null, 0, mirror);
+    analysisRef.current = EMPTY;
+    voiceRef.current.stop();
+    draw(overlayRef.current, videoRef.current, null, 0, mirrorRef.current);
   };
 
   const startSession = () => {
     if (!cameraOn) return;
     if (!confidence.ready) {
-      pushFeedback(`${confidence.message}. Starting anyway — improve framing for better accuracy.`, "warning", "system");
+      pushTelemetry({ timestampMs: 0, type: "calibration_blocked", message: confidence.message, meta: { frameQuality: confidence.frameQuality, view: confidence.view } });
+      toast.error(confidence.message);
+      return;
     }
     reset();
-    startedAtRef.current = Date.now();
-    phaseAtRef.current = Date.now();
-    phaseRef.current = getPhaseForExercise(exerciseIdRef.current, smoothedRef.current ?? []);
+    const now = Date.now();
+    startedAtRef.current = now;
+    phaseTrackerRef.current = trackingFrameRef.current?.smoothedLandmarks?.length
+      ? advancePhaseTracker(exerciseIdRef.current, trackingFrameRef.current, createPhaseTrackerState(now), now).state
+      : createPhaseTrackerState(now);
     runningRef.current = true;
     setRunning(true);
-    setTrackingPausedReason(confidence.ready ? null : `${confidence.message}. Rep counting will stay paused until calibration recovers.`);
-    pushFeedback("Session live. Keep your full body in frame and follow the cue.", "info", "system");
+    setTrackingPausedReason(null);
+    emitCue({
+      message: "Session live. Keep your full body in frame and follow the cue.",
+      severity: "info",
+      source: "system",
+      secondaryNote: "The coach will only interrupt when the issue is stable and important.",
+      signature: buildIssueSignature({ severity: "info", message: "session live keep your full body in frame and follow the cue", channel: "system", side: "body" }),
+    });
   };
 
   const stopSession = async () => {
@@ -615,47 +691,44 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     setRunning(false);
     try {
       const pick = (selector: (frame: FrameAnalysis) => number) => Math.round(average(framesRef.current.map(selector)));
-      const scoring = { form: pick((f) => f.form), rom: pick((f) => f.rom), tempo: pick((f) => f.tempo), stability: pick((f) => f.stability), symmetry: pick((f) => f.symmetry), consistency: pick((f) => f.consistency), endurance: pick((f) => f.endurance), safety: pick((f) => f.safety) };
+      const scoring = { form: pick((frame) => frame.form), rom: pick((frame) => frame.rom), tempo: pick((frame) => frame.tempo), stability: pick((frame) => frame.stability), symmetry: pick((frame) => frame.symmetry), consistency: pick((frame) => frame.consistency), endurance: pick((frame) => frame.endurance), safety: pick((frame) => frame.safety) };
+      const sessionAnalysis = finalizeSessionAnalysis(sessionBufferRef.current);
       const response = await fetch("/api/workouts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           type: mode === "dance" ? "dance" : exerciseRef.current.category === "cardio" ? "cardio" : "strength",
           exerciseType: exerciseIdRef.current,
-          duration: Math.max(1, Math.round(seconds / 60)),
-          caloriesBurned: calories,
+          duration: Math.max(1, Math.round(secondsRef.current / 60)),
+          caloriesBurned: caloriesRef.current,
           totalReps: repsRef.current,
-          compositeScore: analysis.overall,
+          compositeScore: analysisRef.current.overall,
           scoringBreakdown: scoring,
           fatigueCurve: curveRef.current,
-          summary: coachLine || feedback,
-          exercises: [{ exerciseId: exerciseIdRef.current, sets: exerciseRef.current.repBased ? 1 : 0, reps: repsRef.current, duration: seconds, formScore: scoring.form, romScore: scoring.rom, tempoScore: scoring.tempo, safetyScore: scoring.safety, corrections: Array.from(new Set(eventsRef.current.map((event) => event.message))).slice(0, 8) }],
+          summary: coachLineRef.current || feedbackRef.current,
+          exercises: [{ exerciseId: exerciseIdRef.current, sets: exerciseRef.current.repBased ? 1 : 0, reps: repsRef.current, duration: secondsRef.current, formScore: scoring.form, romScore: scoring.rom, tempoScore: scoring.tempo, safetyScore: scoring.safety, corrections: Array.from(new Set(eventsRef.current.map((event) => event.message))).slice(0, 8) }],
           repData: repDataRef.current,
           feedbackEvents: eventsRef.current,
+          sessionAnalysis,
         }),
       });
       const data = await parseApiResponse(response);
-      if (!response.ok) throw new Error(data.error || "Failed to save session");
+      if (!response.ok) throw new Error(data?.error || "Failed to save session");
+
       const topIssues = Array.from(new Set(eventsRef.current.filter((event) => event.severity !== "info").map((event) => event.message))).slice(0, 6);
-      const topStrengths = framesRef.current.length
-        ? [
-            scoring.form >= 80 ? "Form quality stayed strong for most reps." : "",
-            scoring.rom >= 80 ? "Range of motion was consistent." : "",
-            scoring.safety >= 85 ? "Movement stayed safe and controlled." : "",
-          ].filter(Boolean)
-        : [];
+      const topStrengths = framesRef.current.length ? [scoring.form >= 80 ? "Form quality stayed strong for most reps." : "", scoring.rom >= 80 ? "Range of motion was consistent." : "", scoring.safety >= 85 ? "Movement stayed safe and controlled." : ""].filter(Boolean) : [];
       const summaryRes = await fetch("/api/coach/summarize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionId: data.sessionId,
           exerciseType: exerciseIdRef.current,
-          durationMinutes: Math.max(1, Math.round(seconds / 60)),
+          durationMinutes: Math.max(1, Math.round(secondsRef.current / 60)),
           totalReps: repsRef.current,
           scoringBreakdown: scoring,
           topIssues,
           topStrengths,
-          sessionSummary: `Exercise ${exerciseIdRef.current}, ${repsRef.current} reps, overall ${analysis.overall}, issues: ${topIssues.join("; ") || "none"}`,
+          sessionSummary: `Exercise ${exerciseIdRef.current}, ${repsRef.current} reps, overall ${analysisRef.current.overall}, issues: ${topIssues.join("; ") || "none"}, post-set: ${JSON.stringify(sessionAnalysis.postSet)}`,
         }),
       });
       const summaryData = await parseApiResponse(summaryRes);
@@ -673,21 +746,11 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
         }
         setTopMistakes(Array.isArray(summaryData.topMistakes) ? summaryData.topMistakes : []);
         setCorrectivePlan(Array.isArray(summaryData.correctivePlan5Min) ? summaryData.correctivePlan5Min : []);
-      } else if (summaryData?.error) {
-        toast.error(String(summaryData.error));
       }
       if (mode === "dance") {
-        setDanceSegmentBreakdown(
-          Object.entries(danceSegmentRef.current).map(([id, value]) => ({
-            id,
-            label: value.label,
-            overall: Math.round(average(value.scores)),
-            timing: Math.round(average(value.timing)),
-            transition: Math.round(average(value.transition)),
-          })),
-        );
+        setDanceSegmentBreakdown(Object.entries(danceSegmentRef.current).map(([id, value]) => ({ id, label: value.label, overall: Math.round(average(value.scores)), timing: Math.round(average(value.timing)), transition: Math.round(average(value.transition)) })));
       }
-      pushFeedback("Session saved. Review the summary before restarting.", "info", "system");
+      showStatus("Session saved. Review the summary before restarting.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save session");
     } finally {
@@ -696,26 +759,43 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   };
 
   useEffect(() => {
-    reset();
-    setFeedback("Exercise changed. Recalibrate before starting again.");
-  }, [exerciseId]);
+    exerciseIdRef.current = exerciseId;
+    exerciseRef.current = exercise;
+    setConfidence(EMPTY_CONFIDENCE(exerciseId));
+    confidenceRef.current = EMPTY_CONFIDENCE(exerciseId);
+  }, [exercise, exerciseId]);
 
   useEffect(() => {
-    runningRef.current = running;
-  }, [running]);
+    profileRef.current = profile;
+  }, [profile]);
 
   useEffect(() => {
     mirrorRef.current = mirror;
   }, [mirror]);
 
   useEffect(() => {
-    exerciseIdRef.current = exerciseId;
-    exerciseRef.current = exercise;
-  }, [exercise, exerciseId]);
+    danceRoutineRef.current = danceRoutine;
+  }, [danceRoutine]);
 
   useEffect(() => {
-    profileRef.current = profile;
-  }, [profile]);
+    feedbackRef.current = feedback;
+  }, [feedback]);
+
+  useEffect(() => {
+    coachLineRef.current = coachLine;
+  }, [coachLine]);
+
+  useEffect(() => {
+    analysisRef.current = analysis;
+  }, [analysis]);
+
+  useEffect(() => {
+    secondsRef.current = seconds;
+  }, [seconds]);
+
+  useEffect(() => {
+    caloriesRef.current = calories;
+  }, [calories]);
 
   useEffect(() => {
     voiceRef.current.setEnabled(voiceEnabled);
@@ -724,299 +804,448 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   useEffect(() => {
     if (mode !== "dance") {
       setDanceRoutine(null);
+      setDanceComparison(null);
       return;
     }
 
     let cancelled = false;
-    void (async () => {
+    const loadRoutine = async () => {
       try {
-        const response = await fetch("/api/dance/routine", { cache: "no-store" });
+        const response = await fetch("/api/dance/routine");
         const data = await parseApiResponse(response);
-        if (!response.ok || !data?.routine || cancelled) return;
-        setDanceRoutine(normalizeDanceRoutine(data.routine));
-      } catch {}
-    })();
+        if (cancelled) return;
+        if (response.ok) {
+          setDanceRoutine(normalizeDanceRoutine(data?.routine ?? data));
+          return;
+        }
+        setDanceRoutine(null);
+      } catch {
+        if (!cancelled) {
+          setDanceRoutine(null);
+        }
+      }
+    };
+
+    void loadRoutine();
 
     return () => {
       cancelled = true;
     };
   }, [mode]);
 
-  useEffect(() => () => {
-    stopCamera();
-    voiceRef.current.stop();
+  useEffect(() => {
+    return () => {
+      stopCamera();
+      voiceRef.current.stop();
+    };
   }, []);
 
-  const currentDanceCheckpoint = useMemo(
-    () => (mode === "dance" ? getActiveDanceCheckpoint(danceRoutine, seconds * 1000) : null),
-    [danceRoutine, mode, seconds],
+  const qualityPercent = useMemo(() => Math.round(confidence.avgVisibility * 100), [confidence.avgVisibility]);
+  const activeDanceCheckpoint = useMemo(() => getActiveDanceCheckpoint(danceRoutine, seconds * 1000), [danceRoutine, seconds]);
+  const exerciseDescription = useMemo(() => exercise.tips.join(" • "), [exercise]);
+  const scorecard = useMemo(() => {
+    const fallback: TechniqueScorecard = {
+      elbowPath: analysis.form,
+      rangeOfMotion: analysis.rom,
+      tempoControl: analysis.tempo,
+      torsoStability: analysis.stability,
+    };
+    return techniqueScorecard ?? fallback;
+  }, [analysis.form, analysis.rom, analysis.stability, analysis.tempo, techniqueScorecard]);
+  const scorecardRows = useMemo(
+    () =>
+      scorecardLabels(exerciseId).map((item) => ({
+        label: item.label,
+        score: scorecard[item.valueKey],
+      })),
+    [exerciseId, scorecard],
   );
-  const currentScorecardLabels = useMemo(() => scorecardLabels(exerciseId), [exerciseId]);
+  const primaryMetrics = useMemo(() => analysis.metrics.slice(0, 6), [analysis.metrics]);
+  const liveIssues = useMemo(() => [...analysis.injuryRisks, ...analysis.corrections, ...analysis.issues].slice(0, 5), [analysis]);
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-zinc-950 via-zinc-900 to-zinc-950 text-zinc-100">
-      <div className="mx-auto max-w-7xl space-y-6 p-4 lg:p-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <h1 className="text-3xl font-semibold">{mode === "dance" ? "Dance Coach" : "Workout Coach"}</h1>
-            <p className="mt-1 text-sm text-zinc-400">Calibration, live scoring, safety rules, AI feedback, and saved session summaries.</p>
+  const cameraViewport = (
+    <div
+      className={cn(
+        "relative overflow-hidden rounded-[28px] border border-zinc-800 bg-black shadow-[0_30px_100px_rgba(0,0,0,0.45)]",
+        cameraLayout === "portrait" ? "aspect-[3/4]" : "aspect-video",
+      )}
+    >
+      <video
+        ref={videoRef}
+        autoPlay
+        muted
+        playsInline
+        className={cn("h-full w-full object-cover", mirror && "scale-x-[-1]")}
+      />
+      <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 h-full w-full" />
+
+      <div className="pointer-events-none absolute left-4 top-4 flex flex-wrap gap-2">
+        <Badge className="bg-zinc-950/80 text-zinc-100">{exercise.label}</Badge>
+        <Badge className={cn("border-none text-white", confidence.ready ? "bg-emerald-500/90" : "bg-amber-500/90")}>
+          {confidence.frameQuality === "ready" ? "Ready" : confidence.frameQuality.replaceAll("_", " ")}
+        </Badge>
+        <Badge className="bg-zinc-950/80 text-zinc-100">{confidence.view}</Badge>
+        <Badge className="bg-zinc-950/80 text-zinc-100">{fps} FPS</Badge>
+        <Badge className={cn("border-none text-white", text(analysis.overall).replace("text-", "bg-").replace("400", "500/90"))}>
+          Score {analysis.overall}
+        </Badge>
+      </div>
+
+      {trackingPausedReason ? (
+        <div className="pointer-events-none absolute inset-x-4 top-16 rounded-2xl border border-amber-500/40 bg-zinc-950/85 p-3 text-sm text-amber-100">
+          {trackingPausedReason}
+        </div>
+      ) : null}
+
+      {!running ? (
+        <div className="absolute inset-x-4 bottom-4">
+          <SessionSetupCard
+            cameraOn={cameraOn}
+            loading={loading}
+            ready={cameraOn && confidence.ready}
+            title={`${exercise.label} setup`}
+            description={exerciseDescription}
+            calibration={exercise.calibration}
+            confidenceMessage={confidence.message}
+            onEnableCamera={startCamera}
+            onStartSession={startSession}
+          />
+        </div>
+      ) : null}
+
+      {running ? (
+        <div className="absolute inset-x-4 bottom-4 flex flex-wrap items-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-950/85 px-4 py-3 text-sm text-zinc-200 backdrop-blur">
+          <div className="flex items-center gap-2 rounded-full bg-zinc-900 px-3 py-1.5">
+            <Timer className="h-4 w-4 text-cyan-300" />
+            <span>{seconds}s</span>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {exercises.map((item) => (
-              <Button key={item.id} variant={exerciseId === item.id ? "default" : "outline"} className={cn("rounded-full border-zinc-700 bg-zinc-900/70 text-zinc-100", exerciseId === item.id && "border-orange-500 bg-gradient-to-r from-orange-500 to-rose-500 text-white")} onClick={() => setExerciseId(item.id)}>
-                {item.label}
-              </Button>
-            ))}
+          <div className="flex items-center gap-2 rounded-full bg-zinc-900 px-3 py-1.5">
+            <Zap className="h-4 w-4 text-orange-300" />
+            <span>{repsRef.current} reps</span>
+          </div>
+          <div className="flex items-center gap-2 rounded-full bg-zinc-900 px-3 py-1.5">
+            <Waves className="h-4 w-4 text-fuchsia-300" />
+            <span>{calories} kcal</span>
+          </div>
+          <div className="ml-auto flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" className="border-zinc-700 bg-zinc-900 text-zinc-100" onClick={() => setMirror((value) => !value)}>
+              {mirror ? <Monitor className="h-4 w-4" /> : <RotateCcw className="h-4 w-4" />}
+              Mirror
+            </Button>
+            <Button size="sm" variant="outline" className="border-zinc-700 bg-zinc-900 text-zinc-100" onClick={() => setVoiceEnabled((value) => !value)}>
+              {voiceEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+              Voice
+            </Button>
+            <Button size="sm" variant="outline" className="border-zinc-700 bg-zinc-900 text-zinc-100" onClick={() => setCameraLayout((value) => (value === "landscape" ? "portrait" : "landscape"))}>
+              {cameraLayout === "landscape" ? <Smartphone className="h-4 w-4" /> : <Monitor className="h-4 w-4" />}
+              Layout
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-zinc-700 bg-zinc-900 text-zinc-100"
+              onClick={() => setCameraViewMode((value) => (value === "pip" ? "full" : "pip"))}
+            >
+              {cameraViewMode === "pip" ? <Maximize2 className="h-4 w-4" /> : <Minimize2 className="h-4 w-4" />}
+              PiP
+            </Button>
+            <Button size="sm" className="bg-rose-500 text-white hover:bg-rose-600" onClick={() => void stopSession()}>
+              Stop session
+            </Button>
           </div>
         </div>
+      ) : null}
+    </div>
+  );
 
-        <div className="grid gap-6 xl:grid-cols-[1.55fr_1fr]">
-          <Card className="overflow-hidden border-zinc-800 bg-zinc-900/85">
-            <CardContent className="p-0">
-              <div className="relative aspect-video bg-black">
-                <video ref={videoRef} className={cn("absolute inset-0 h-full w-full object-cover", mirror && "-scale-x-100")} playsInline muted />
-                <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 h-full w-full" />
-                {!running ? (
-                  <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-950/55 p-4">
-                    <SessionSetupCard
-                      cameraOn={cameraOn}
-                      loading={loading}
-                      ready={confidence.ready}
-                      title={exercise.label}
-                      description={mode === "dance" ? danceRoutine?.description ?? "Lock in your frame before the phrase starts." : "Finish calibration before the session starts so rep counting stays reliable."}
-                      calibration={exercise.calibration}
-                      confidenceMessage={confidence.message}
-                      onEnableCamera={startCamera}
-                      onStartSession={startSession}
-                    />
-                  </div>
-                ) : null}
-                {!cameraOn ? <div className="absolute inset-0 flex items-center justify-center"><div className="space-y-4 rounded-3xl border border-zinc-800 bg-zinc-900/90 p-8 text-center"><Badge className="bg-orange-500/15 text-orange-300">Calibration required</Badge><p className="text-lg font-semibold">{exercise.label}</p><p className="max-w-sm text-sm text-zinc-400">{exercise.calibration.join(" • ")}</p><Button className="w-full gap-2 bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600" onClick={startCamera} disabled={loading}><Camera className="h-4 w-4" />{loading ? "Loading camera..." : "Enable camera"}</Button></div></div> : null}
-                {cameraOn ? <div className="absolute left-4 top-4 flex gap-3"><div className="rounded-2xl border border-zinc-700 bg-zinc-950/85 px-4 py-3"><p className="text-xs text-zinc-400">Confidence</p><p className="text-xl font-semibold">{Math.round(confidence.avgVisibility * 100)}%</p></div><div className="rounded-2xl border border-zinc-700 bg-zinc-950/85 px-4 py-3"><p className="text-xs text-zinc-400">FPS</p><p className="text-xl font-semibold">{fps || "-"}</p></div><div className="rounded-2xl border border-zinc-700 bg-zinc-950/85 px-4 py-3"><p className="text-xs text-zinc-400">Score</p><p className={cn("text-xl font-semibold", text(analysis.overall))}>{analysis.overall}</p></div></div> : null}
-                {cameraOn ? <div className="absolute bottom-4 left-4 right-4 rounded-3xl border border-zinc-700 bg-zinc-950/90 p-4"><div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"><div><p className="text-sm font-medium">{trackingPausedReason || feedback}</p><p className="mt-1 text-xs text-zinc-400">{trackingPausedReason || coachLine || summary || confidence.message}</p></div><div className="flex flex-wrap items-center gap-3 text-sm"><span className="inline-flex items-center gap-1"><Timer className="h-4 w-4" />{Math.floor(seconds / 60)}:{(seconds % 60).toString().padStart(2, "0")}</span><span className="inline-flex items-center gap-1"><Zap className="h-4 w-4 text-amber-400" />{repsRef.current} reps</span><span className="inline-flex items-center gap-1"><Waves className="h-4 w-4 text-cyan-400" />{calories} kcal</span><Button variant="outline" className="border-zinc-700 bg-zinc-900 text-zinc-100" onClick={() => setMirror((value) => !value)}>Mirror {mirror ? "on" : "off"}</Button><Button variant="outline" className="border-zinc-700 bg-zinc-900 text-zinc-100" onClick={() => setVoiceEnabled((value) => !value)}>{voiceEnabled ? <Volume2 className="mr-2 h-4 w-4" /> : <VolumeX className="mr-2 h-4 w-4" />}Voice {voiceEnabled ? "on" : "off"}</Button>{!running ? <Button className="bg-gradient-to-r from-emerald-500 to-teal-500 text-white hover:from-emerald-600 hover:to-teal-600" onClick={startSession}>Start session</Button> : <Button className="bg-gradient-to-r from-rose-500 to-red-500 text-white hover:from-rose-600 hover:to-red-600" onClick={() => void stopSession()}>Stop & save</Button>}<Button variant="outline" className="border-zinc-700 bg-zinc-900 text-zinc-100" onClick={stopCamera}><CameraOff className="mr-2 h-4 w-4" />Close</Button></div></div></div> : null}
-              </div>
-            </CardContent>
-          </Card>
-
+  return (
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(249,115,22,0.12),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(6,182,212,0.12),_transparent_26%),linear-gradient(180deg,_#09090b,_#111827_45%,_#09090b)] text-zinc-100">
+      <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 px-4 py-6 sm:px-6 xl:px-8">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.8fr)_minmax(360px,1fr)]">
           <div className="space-y-4">
-            <Card className="border-zinc-800 bg-zinc-900/85">
-              <CardHeader><CardTitle className="flex items-center gap-2"><AlertTriangle className="h-5 w-5 text-amber-400" />Calibration</CardTitle><CardDescription>{exercise.label} readiness gate before analysis starts.</CardDescription></CardHeader>
-              <CardContent className="space-y-3">{exercise.calibration.map((item) => <div key={item} className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-sm"><span>{item}</span><Badge variant="outline" className={cn("border-zinc-700 text-zinc-300", confidence.ready && "border-emerald-500/40 text-emerald-300")}>{confidence.ready ? "ready" : "check"}</Badge></div>)}<div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3 text-sm text-zinc-300">{confidence.message}</div></CardContent>
+            <Card className="border-zinc-800 bg-zinc-950/70 text-zinc-100">
+              <CardHeader className="pb-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                  <div>
+                    <Badge className="mb-3 bg-orange-500/15 text-orange-300">{mode === "dance" ? "Dance coach" : "Workout coach"}</Badge>
+                    <CardTitle className="text-3xl">{exercise.label}</CardTitle>
+                    <CardDescription className="mt-2 max-w-3xl text-zinc-400">{exerciseDescription}</CardDescription>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {exercises.map((item) => (
+                      <Button
+                        key={item.id}
+                        size="sm"
+                        variant={item.id === exerciseId ? "default" : "outline"}
+                        className={cn(item.id === exerciseId ? "bg-gradient-to-r from-orange-500 to-rose-500 text-white" : "border-zinc-700 bg-zinc-950 text-zinc-200")}
+                        onClick={() => {
+                          if (item.id === exerciseId) return;
+                          stopCamera();
+                          reset();
+                          setExerciseId(item.id);
+                        }}
+                      >
+                        {item.label}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              </CardHeader>
             </Card>
 
-            <Card className="border-zinc-800 bg-zinc-900/85">
-              <CardHeader><CardTitle>Posture guide</CardTitle><CardDescription>{exercise.label} setup cues to keep the rep strict and safe.</CardDescription></CardHeader>
-              <CardContent className="space-y-2 text-sm text-zinc-300">
-                {exercise.tips.map((item) => (
-                  <div key={item} className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
-                    {item}
+            {cameraViewMode === "full" ? cameraViewport : null}
+
+            {cameraViewMode === "minimized" ? (
+              <Card className="border-zinc-800 bg-zinc-950/70 text-zinc-100">
+                <CardContent className="flex items-center justify-between gap-3 p-4">
+                  <div>
+                    <p className="font-medium">Camera is minimized</p>
+                    <p className="text-sm text-zinc-400">Tracking stays active while the viewport is hidden.</p>
                   </div>
-                ))}
+                  <Button className="bg-zinc-100 text-zinc-950 hover:bg-white" onClick={() => setCameraViewMode("full")}>
+                    Restore camera
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : null}
+          </div>
+
+          <div className="space-y-4">
+            <Card className="border-zinc-800 bg-zinc-950/70 text-zinc-100">
+              <CardHeader>
+                <CardTitle>Live feedback</CardTitle>
+                <CardDescription className="text-zinc-400">Safety overrides everything else. The coach only speaks when the issue is stable enough to matter.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className={cn("rounded-2xl border p-4", analysis.injuryRisks.length ? "border-rose-500/40 bg-rose-500/10" : analysis.corrections.length ? "border-amber-500/40 bg-amber-500/10" : "border-emerald-500/30 bg-emerald-500/10")}>
+                  <p className="text-lg font-semibold">{feedback}</p>
+                  {secondaryFeedback ? <p className="mt-2 text-sm text-zinc-300">{secondaryFeedback}</p> : null}
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                    <p className="text-xs uppercase tracking-[0.24em] text-zinc-500">What is right</p>
+                    <p className="mt-2 text-sm text-zinc-200">{analysis.positives[0] ?? "Hold the current shape and keep the rhythm stable."}</p>
+                  </div>
+                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                    <p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Fix now</p>
+                    <p className="mt-2 text-sm text-zinc-200">{analysis.corrections[0] ?? analysis.targetCue ?? "No immediate correction. Stay consistent."}</p>
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                  <div className="flex items-center gap-2">
+                    <Mic className="h-4 w-4 text-cyan-300" />
+                    <p className="text-sm font-medium text-zinc-200">AI refinement {coachSource ? `(${coachSource})` : ""}</p>
+                  </div>
+                  <p className="mt-2 text-sm text-zinc-300">{coachLine || "The grounded rule engine is active. AI refinement appears on meaningful changes and post-set summaries."}</p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-zinc-800 bg-zinc-950/70 text-zinc-100">
+              <CardHeader>
+                <CardTitle>Calibration and tracking</CardTitle>
+                <CardDescription className="text-zinc-400">Rep counting and posture judgments only run when frame quality is ready.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                    <p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Frame quality</p>
+                    <p className="mt-2 text-lg font-semibold capitalize">{confidence.frameQuality.replaceAll("_", " ")}</p>
+                    <p className="mt-2 text-sm text-zinc-400">{confidence.message}</p>
+                  </div>
+                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                    <p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Camera profile</p>
+                    <p className="mt-2 text-lg font-semibold">{cameraProfileLabel}</p>
+                    <p className="mt-2 text-sm text-zinc-400">Allowed views: {confidence.allowedViews.join(", ")}</p>
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <div className="mb-2 flex items-center justify-between text-sm">
+                      <span className="text-zinc-400">Tracking confidence</span>
+                      <span className="font-medium text-zinc-100">{qualityPercent}%</span>
+                    </div>
+                    <Progress value={qualityPercent} className="h-2 bg-zinc-800" />
+                  </div>
+                  <div className="grid gap-2 text-sm text-zinc-300 sm:grid-cols-3">
+                    <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-3 py-2">View: <span className="font-medium text-zinc-100">{confidence.view}</span></div>
+                    <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-3 py-2">Brightness: <span className="font-medium text-zinc-100">{Math.round(confidence.brightness)}</span></div>
+                    <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-3 py-2">Motion: <span className="font-medium text-zinc-100">{confidence.motion.toFixed(1)}</span></div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-zinc-800 bg-zinc-950/70 text-zinc-100">
+              <CardHeader>
+                <CardTitle>Score breakdown</CardTitle>
+                <CardDescription className="text-zinc-400">The live score is composed from deterministic movement metrics, not LLM guesses.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {scorecardRows.map((item) => (
+                    <div key={item.label} className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm text-zinc-400">{item.label}</p>
+                        <span className={cn("text-sm font-semibold", text(item.score))}>{item.score}</span>
+                      </div>
+                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-800">
+                        <div className={cn("h-full rounded-full bg-gradient-to-r", bar(item.score))} style={{ width: `${Math.max(4, item.score)}%` }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="space-y-2">
+                  {primaryMetrics.map((metric) => (
+                    <div key={`${metric.name}-${metric.detail}`} className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-3 py-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium text-zinc-100">{metric.name}</p>
+                          <p className="text-xs text-zinc-500">{metric.detail}</p>
+                        </div>
+                        <span className={cn("text-sm font-semibold", text(metric.score))}>{metric.score}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {liveIssues.length ? (
+                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                    <p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Active issue history</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {liveIssues.map((issue) => (
+                        <Badge key={issue} variant="outline" className="border-zinc-700 text-zinc-200">
+                          {issue}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </CardContent>
             </Card>
 
             {mode === "dance" ? (
-              <Card className="border-zinc-800 bg-zinc-900/85">
+              <Card className="border-zinc-800 bg-zinc-950/70 text-zinc-100">
                 <CardHeader>
-                  <CardTitle>Routine cue</CardTitle>
-                  <CardDescription>{danceRoutine?.name ?? "Seeded dance routine"} live phrase target.</CardDescription>
+                  <CardTitle>Routine sync</CardTitle>
+                  <CardDescription className="text-zinc-400">Packaged routine assets drive the active phrase, timing score, and post-run breakdown.</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-2 text-sm text-zinc-300">
-                  <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
-                    {currentDanceCheckpoint?.step.cue ?? "Start the session to lock onto the current phrase."}
-                  </div>
-                  <div className="text-xs text-zinc-500">
-                    {currentDanceCheckpoint ? `Checkpoint ${currentDanceCheckpoint.index + 1}` : "No routine checkpoint loaded"}
+                <CardContent className="space-y-4">
+                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                    <p className="text-sm font-medium text-zinc-100">{danceRoutine?.name ?? "Loading routine"}</p>
+                    <p className="mt-1 text-sm text-zinc-400">{activeDanceCheckpoint?.step.cue ?? "Waiting for the first phrase."}</p>
                   </div>
                   {danceComparison ? (
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-2">
-                        <p className="text-zinc-400">Segment</p>
-                        <p className="mt-1 font-medium text-zinc-100">{danceComparison.segment.label}</p>
-                      </div>
-                      <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-2">
-                        <p className="text-zinc-400">Pose similarity</p>
-                        <p className="mt-1 font-medium text-zinc-100">{danceComparison.poseSimilarity}/100</p>
-                      </div>
-                      <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-2">
-                        <p className="text-zinc-400">Timing</p>
-                        <p className="mt-1 font-medium text-zinc-100">{danceComparison.timingScore}/100</p>
-                      </div>
-                      <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-2">
-                        <p className="text-zinc-400">Transition</p>
-                        <p className="mt-1 font-medium text-zinc-100">{danceComparison.transitionQuality}/100</p>
-                      </div>
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4"><p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Pose</p><p className="mt-2 text-2xl font-semibold">{danceComparison.poseSimilarity}</p></div>
+                      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4"><p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Timing</p><p className="mt-2 text-2xl font-semibold">{danceComparison.timingScore}</p></div>
+                      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4"><p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Transition</p><p className="mt-2 text-2xl font-semibold">{danceComparison.transitionQuality}</p></div>
                     </div>
                   ) : null}
-                  {danceComparison?.notes.length ? (
-                    <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3 text-xs text-zinc-300">
-                      {danceComparison.notes[0]}
+                  {danceSegmentBreakdown.length ? (
+                    <div className="space-y-2">
+                      {danceSegmentBreakdown.map((segment) => (
+                        <div key={segment.id} className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                          <div className="flex items-center justify-between">
+                            <p className="font-medium text-zinc-100">{segment.label}</p>
+                            <Badge className="bg-zinc-100 text-zinc-950">Overall {segment.overall}</Badge>
+                          </div>
+                          <p className="mt-2 text-sm text-zinc-400">Timing {segment.timing} • Transition {segment.transition}</p>
+                        </div>
+                      ))}
                     </div>
                   ) : null}
-                  {danceRoutine?.audioUrl ? <audio className="w-full" controls src={danceRoutine.audioUrl} preload="none" /> : null}
                 </CardContent>
               </Card>
             ) : null}
 
-            <Card className="border-zinc-800 bg-zinc-900/85">
-              <CardHeader><CardTitle>Live metrics</CardTitle><CardDescription>Form, ROM, tempo, stability, and safety from the modular pose engine.</CardDescription></CardHeader>
-              <CardContent className="space-y-4">{analysis.metrics.length ? analysis.metrics.map((item) => <div key={item.name} className="space-y-2"><div className="flex items-center justify-between text-sm"><div><p className="font-medium text-zinc-100">{item.name}</p><p className="text-xs text-zinc-400">{item.detail}</p></div><span className={cn("font-semibold", text(item.score))}>{item.score}</span></div><div className="h-2 overflow-hidden rounded-full bg-zinc-800"><div className={cn("h-full rounded-full bg-gradient-to-r", bar(item.score))} style={{ width: `${item.score}%` }} /></div></div>) : <p className="text-sm text-zinc-400">Start the camera and complete calibration to begin scoring.</p>}</CardContent>
-            </Card>
-
-            <div className="grid grid-cols-2 gap-4">
-              <Card className="border-zinc-800 bg-zinc-900/85"><CardContent className="pt-6"><p className="text-xs text-zinc-400">Composite</p><p className={cn("mt-2 text-3xl font-semibold", text(analysis.overall))}>{analysis.overall}</p><Progress className="mt-3 h-2 bg-zinc-800" value={analysis.overall} /></CardContent></Card>
-              <Card className="border-zinc-800 bg-zinc-900/85"><CardContent className="pt-6"><p className="text-xs text-zinc-400">Phase</p><p className="mt-2 text-3xl font-semibold capitalize">{analysis.phase}</p><p className="mt-1 text-xs text-zinc-400">{exerciseId === "bicep_curl" || exerciseId === "dance_basic" ? trackedSideLabel(analysis.trackedSide) : "Whole-body tracking"}</p><Button variant="ghost" className="mt-3 h-auto p-0 text-xs text-zinc-400 hover:bg-transparent" onClick={reset}><RotateCcw className="mr-1 h-3 w-3" />Reset local metrics</Button></CardContent></Card>
-            </div>
-
-            <Card className="border-zinc-800 bg-zinc-900/85">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Mic className="h-5 w-5 text-cyan-400" />
-                  Coach feedback
-                </CardTitle>
-                <CardDescription>Rules first, AI prompts with personalized cues and post-session fixes. Voice guidance is {voiceEnabled ? "enabled" : "muted"}.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
-                  <p className="font-medium">Current cue</p>
-                  <p className="mt-1 text-zinc-400">{trackingPausedReason || feedback}</p>
-                </div>
-
-                <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
-                  <p className="font-medium">Coach line</p>
-                  <p className="mt-1 text-zinc-400">{coachLine || "The coach will step in once there is enough live data."}</p>
-                  <p className="mt-2 text-[11px] uppercase tracking-wide text-zinc-500">
-                    Source: {coachSource === "llm" ? "LLM coaching" : coachSource === "fallback" ? "Rule fallback" : "pending"}
-                  </p>
-                </div>
-
-                {analysis.positives.length ? (
-                  <div className="rounded-xl border border-emerald-900/40 bg-emerald-950/20 p-3">
-                    <p className="font-medium text-emerald-300">What you are doing right</p>
-                    <ul className="mt-2 list-disc space-y-1 pl-5 text-zinc-300">
-                      {analysis.positives.slice(0, 3).map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-
-                {analysis.corrections.length ? (
-                  <div className="rounded-xl border border-amber-900/40 bg-amber-950/20 p-3">
-                    <p className="font-medium text-amber-300">Fix now</p>
-                    <ul className="mt-2 list-disc space-y-1 pl-5 text-zinc-300">
-                      {analysis.corrections.slice(0, 4).map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-
-                {analysis.injuryRisks.length ? (
-                  <div className="rounded-xl border border-rose-900/40 bg-rose-950/20 p-3">
-                    <p className="font-medium text-rose-300">Injury watch</p>
-                    <ul className="mt-2 list-disc space-y-1 pl-5 text-zinc-300">
-                      {analysis.injuryRisks.slice(0, 3).map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-
-                {summary ? (
-                  <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
-                    <p className="font-medium">Session report</p>
-                    <p className="mt-1 text-zinc-300">{summary}</p>
-
-                    {techniqueScorecard ? (
-                      <div className="mt-3">
-                        <p className="font-medium text-zinc-200">Technique scorecard</p>
-                        <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-                          {currentScorecardLabels.map((scoreItem) => (
-                            <div key={scoreItem.label} className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2">
-                              <p className="text-zinc-400">{scoreItem.label}</p>
-                              <p className="mt-1 font-semibold text-zinc-100">{Math.round(techniqueScorecard[scoreItem.valueKey])}/100</p>
-                            </div>
-                          ))}
-                        </div>
+            {(summary || summaryInsights.length || summaryPractice.length || topMistakes.length || correctivePlan.length) ? (
+              <Card className="border-zinc-800 bg-zinc-950/70 text-zinc-100">
+                <CardHeader>
+                  <CardTitle>Post-session review</CardTitle>
+                  <CardDescription className="text-zinc-400">Grounded in saved issue history, frame-quality stats, and post-set aggregates.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {summary ? <p className="text-sm leading-6 text-zinc-200">{summary}</p> : null}
+                  {summaryInsights.length ? (
+                    <div>
+                      <p className="mb-2 text-xs uppercase tracking-[0.24em] text-zinc-500">Key insights</p>
+                      <div className="space-y-2">
+                        {summaryInsights.map((item) => (
+                          <div key={item} className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-sm text-zinc-200">{item}</div>
+                        ))}
                       </div>
-                    ) : null}
-
-                    {topMistakes.length ? (
-                      <div className="mt-3">
-                        <p className="font-medium text-zinc-200">Top 3 mistakes and exact fixes</p>
-                        <div className="mt-2 space-y-2">
-                          {topMistakes.slice(0, 3).map((mistakeItem, index) => (
-                            <div key={`${mistakeItem.mistake}-${index}`} className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2">
-                              <p className="text-zinc-100">
-                                {index + 1}. {mistakeItem.mistake}
-                              </p>
-                              <p className="mt-1 text-zinc-400">Why: {mistakeItem.whyItHurtsPerformance}</p>
-                              <p className="mt-1 text-zinc-300">Fix: {mistakeItem.exactFix}</p>
-                            </div>
-                          ))}
-                        </div>
+                    </div>
+                  ) : null}
+                  {topMistakes.length ? (
+                    <div>
+                      <p className="mb-2 text-xs uppercase tracking-[0.24em] text-zinc-500">Top mistakes</p>
+                      <div className="space-y-2">
+                        {topMistakes.map((item) => (
+                          <div key={item.mistake} className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+                            <p className="font-medium text-zinc-100">{item.mistake}</p>
+                            <p className="mt-1 text-sm text-zinc-400">{item.whyItHurtsPerformance}</p>
+                            <p className="mt-2 text-sm text-zinc-200">{item.exactFix}</p>
+                          </div>
+                        ))}
                       </div>
-                    ) : null}
-
-                    {correctivePlan.length ? (
-                      <div className="mt-3">
-                        <p className="font-medium text-zinc-200">5-minute corrective practice plan</p>
-                        <div className="mt-2 space-y-2">
-                          {correctivePlan.slice(0, 3).map((block, index) => (
-                            <div key={`${block.minuteRange}-${index}`} className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2">
-                              <p className="text-zinc-100">
-                                {block.minuteRange} — {block.drill}
-                              </p>
-                              <p className="mt-1 text-zinc-300">Focus cue: {block.focusCue}</p>
-                            </div>
-                          ))}
-                        </div>
+                    </div>
+                  ) : null}
+                  {correctivePlan.length ? (
+                    <div>
+                      <p className="mb-2 text-xs uppercase tracking-[0.24em] text-zinc-500">5 minute corrective block</p>
+                      <div className="space-y-2">
+                        {correctivePlan.map((item) => (
+                          <div key={`${item.minuteRange}-${item.drill}`} className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+                            <p className="font-medium text-zinc-100">{item.minuteRange} • {item.drill}</p>
+                            <p className="mt-1 text-sm text-zinc-300">{item.focusCue}</p>
+                          </div>
+                        ))}
                       </div>
-                    ) : null}
-
-                    {mode === "dance" && danceSegmentBreakdown.length ? (
-                      <div className="mt-3">
-                        <p className="font-medium text-zinc-200">Segment breakdown</p>
-                        <div className="mt-2 space-y-2">
-                          {danceSegmentBreakdown.map((segment) => (
-                            <div key={segment.id} className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-2">
-                              <p className="text-zinc-100">{segment.label}</p>
-                              <p className="mt-1 text-zinc-400">Overall {segment.overall}/100, timing {segment.timing}/100, transition {segment.transition}/100</p>
-                            </div>
-                          ))}
-                        </div>
+                    </div>
+                  ) : null}
+                  {summaryPractice.length ? (
+                    <div>
+                      <p className="mb-2 text-xs uppercase tracking-[0.24em] text-zinc-500">Next session focus</p>
+                      <div className="space-y-2">
+                        {summaryPractice.map((item) => (
+                          <div key={item} className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-sm text-zinc-200">{item}</div>
+                        ))}
                       </div>
-                    ) : null}
-
-                    {summaryInsights.length ? (
-                      <div className="mt-3">
-                        <p className="font-medium text-zinc-200">Highlights</p>
-                        <ul className="mt-1 list-disc space-y-1 pl-5 text-zinc-400">
-                          {summaryInsights.map((item) => (
-                            <li key={item}>{item}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-
-                    {summaryPractice.length ? (
-                      <div className="mt-3">
-                        <p className="font-medium text-zinc-200">Practice next</p>
-                        <ul className="mt-1 list-disc space-y-1 pl-5 text-zinc-400">
-                          {summaryPractice.map((item) => (
-                            <li key={item}>{item}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-              </CardContent>
-            </Card>
+                    </div>
+                  ) : null}
+                </CardContent>
+              </Card>
+            ) : null}
           </div>
         </div>
       </div>
+
+      {cameraViewMode === "pip" ? (
+        <div
+          className="fixed z-50 w-[340px] max-w-[calc(100vw-32px)]"
+          style={{ right: `${pipPos.x}px`, bottom: `${pipPos.y}px` }}
+          onPointerMove={onPipPointerMove}
+          onPointerUp={onPipPointerUp}
+        >
+          <div className="overflow-hidden rounded-[28px] border border-zinc-700 bg-zinc-950/95 shadow-[0_30px_100px_rgba(0,0,0,0.55)] backdrop-blur">
+            <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3 text-sm text-zinc-200">
+              <button type="button" className="flex items-center gap-2" onPointerDown={onPipPointerDown}>
+                <GripVertical className="h-4 w-4 text-zinc-500" />
+                Camera monitor
+              </button>
+              <div className="flex gap-2">
+                <Button size="icon" variant="ghost" className="h-8 w-8 text-zinc-300 hover:bg-zinc-800" onClick={() => setCameraViewMode("minimized")}>
+                  <Minimize2 className="h-4 w-4" />
+                </Button>
+                <Button size="icon" variant="ghost" className="h-8 w-8 text-zinc-300 hover:bg-zinc-800" onClick={() => setCameraViewMode("full")}>
+                  <Maximize2 className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            {cameraViewport}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

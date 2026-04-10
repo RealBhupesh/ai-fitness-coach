@@ -71,8 +71,8 @@ export function SessionSetupCard({
               {loading ? "Loading camera..." : "Enable camera"}
             </Button>
           ) : null}
-          <Button variant="outline" className="flex-1 border-zinc-700 bg-zinc-950 text-zinc-100" onClick={onStartSession} disabled={!cameraOn}>
-            Start session
+          <Button variant="outline" className="flex-1 border-zinc-700 bg-zinc-950 text-zinc-100" onClick={onStartSession} disabled={!cameraOn || !ready}>
+            {ready ? "Start session" : "Finish calibration"}
           </Button>
         </div>
       </CardContent>

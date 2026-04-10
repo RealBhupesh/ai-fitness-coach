@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "@/lib/auth/client";
+import { clearDemoSession, isDemoUser } from "@/lib/dummy-auth";
 import { useUserProfile } from "@/hooks/useUserProfile";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -62,6 +63,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { profile, session, loading } = useUserProfile();
+  const demoMode = Boolean(session?.user?.id && isDemoUser(session.user.id));
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -105,7 +107,12 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   };
 
   const handleLogout = async () => {
-    await signOut();
+    clearDemoSession();
+    if (!demoMode) {
+      try {
+        await signOut();
+      } catch {}
+    }
     router.push("/");
     router.refresh();
   };
@@ -230,7 +237,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             initials={initials}
             loading={loading}
             name={profile?.name ?? session?.user?.name ?? "FitCoach user"}
-            subtitle={profile?.experience ?? "beginner"}
+            subtitle={demoMode ? "demo mode" : profile?.experience ?? "beginner"}
+            demoMode={demoMode}
             onLogout={handleLogout}
           />
         </div>
@@ -271,7 +279,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             initials={initials}
             loading={loading}
             name={profile?.name ?? session?.user?.name ?? "FitCoach user"}
-            subtitle={profile?.experience ?? "beginner"}
+            subtitle={demoMode ? "demo mode" : profile?.experience ?? "beginner"}
+            demoMode={demoMode}
             onLogout={handleLogout}
           />
         </div>
@@ -289,12 +298,14 @@ function UserMenu({
   loading,
   name,
   subtitle,
+  demoMode,
   onLogout,
 }: {
   initials: string;
   loading: boolean;
   name: string;
   subtitle: string;
+  demoMode: boolean;
   onLogout: () => void | Promise<void>;
 }) {
   return (
@@ -314,6 +325,7 @@ function UserMenu({
           <div className="flex flex-col gap-1">
             <p className="text-sm font-medium leading-none">{name}</p>
             <p className="text-xs leading-none text-muted-foreground capitalize">{subtitle}</p>
+            {demoMode ? <p className="text-[11px] leading-none text-amber-500">Testing mode with local demo session</p> : null}
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />

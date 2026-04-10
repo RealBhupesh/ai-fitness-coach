@@ -153,6 +153,11 @@ export const workoutSessions = pgTable("workout_sessions", {
   totalReps: integer("total_reps"),
   avgRepDurationMs: integer("avg_rep_duration_ms"),
   fatigueCurve: text("fatigue_curve"),
+  frameQualityStats: text("frame_quality_stats"),
+  issueHistory: text("issue_history"),
+  phaseHistory: text("phase_history"),
+  telemetry: text("telemetry"),
+  postSetAnalysis: text("post_set_analysis"),
   createdAt: createdAt(),
 });
 

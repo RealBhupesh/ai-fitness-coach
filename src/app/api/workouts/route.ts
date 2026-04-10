@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { exerciseReps, sessionFeedbackEvents, workoutExercises, workoutSessions } from "@/db/schema";
 import { requireServerSession } from "@/lib/auth/session";
+import { isDemoUser } from "@/lib/dummy-auth";
 import { guardMutationRequest, getRequestIp } from "@/lib/security/request-guard";
 import { workoutSessionInputSchema } from "@/lib/validation/schemas";
 import { toJson } from "@/lib/utils/json";
@@ -11,6 +12,9 @@ import { toJson } from "@/lib/utils/json";
 export async function GET(request: Request) {
   try {
     const session = await requireServerSession(request);
+    if (isDemoUser(session.user.id)) {
+      return NextResponse.json({ workouts: [] });
+    }
     const workouts = await db.query.workoutSessions.findMany({
       where: eq(workoutSessions.userId, session.user.id),
       orderBy: [desc(workoutSessions.date)],
@@ -44,6 +48,10 @@ export async function POST(request: Request) {
     const data = parsed.data;
     const sessionId = nanoid();
 
+    if (isDemoUser(session.user.id)) {
+      return NextResponse.json({ message: "Workout recorded (demo mode)", sessionId });
+    }
+
     await db.insert(workoutSessions).values({
       id: sessionId,
       userId: session.user.id,
@@ -62,6 +70,11 @@ export async function POST(request: Request) {
           ? Math.round(data.repData.reduce((sum, rep) => sum + rep.durationMs, 0) / data.repData.length)
           : 0,
       fatigueCurve: toJson(data.fatigueCurve),
+      frameQualityStats: data.sessionAnalysis ? toJson(data.sessionAnalysis.frameQualityStats) : null,
+      issueHistory: data.sessionAnalysis ? toJson(data.sessionAnalysis.issueHistory) : null,
+      phaseHistory: data.sessionAnalysis ? toJson(data.sessionAnalysis.phaseHistory) : null,
+      telemetry: data.sessionAnalysis ? toJson(data.sessionAnalysis.telemetry) : null,
+      postSetAnalysis: data.sessionAnalysis ? toJson(data.sessionAnalysis.postSet) : null,
       createdAt: new Date(),
     });
 

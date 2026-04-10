@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { chatMessages, chatSessions } from "@/db/schema";
 import { requireServerSession } from "@/lib/auth/session";
+import { isDemoUser } from "@/lib/dummy-auth";
 import { generateCoachMessage } from "@/lib/ai/coach";
 import { chatInputSchema } from "@/lib/validation/schemas";
 import { ensureChatSession, getAppProfile } from "@/lib/server/app-data";
@@ -13,6 +14,9 @@ import { toJson } from "@/lib/utils/json";
 export async function GET(request: Request) {
   try {
     const session = await requireServerSession(request);
+    if (isDemoUser(session.user.id)) {
+      return NextResponse.json({ messages: [] });
+    }
     const messages = await db.query.chatMessages.findMany({
       where: eq(chatMessages.userId, session.user.id),
       orderBy: [desc(chatMessages.createdAt)],
@@ -41,6 +45,22 @@ export async function POST(request: Request) {
     const parsed = chatInputSchema.safeParse(await request.json());
     if (!parsed.success) {
       return NextResponse.json({ error: "Invalid chat payload", details: parsed.error.flatten() }, { status: 400 });
+    }
+
+    if (isDemoUser(session.user.id)) {
+      const generated = await generateCoachMessage({
+        profile: null,
+        recentMessages: [],
+        sessionSummary: "Demo chat session",
+        sessionContext: "Demo mode (no persistence)",
+        userMessage: parsed.data.message,
+      });
+
+      return NextResponse.json({
+        message: generated.message,
+        tokens: generated.tokens,
+        provider: generated.provider,
+      });
     }
 
     const currentChatSession = await ensureChatSession(session.user.id);

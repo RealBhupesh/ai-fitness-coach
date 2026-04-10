@@ -1,16 +1,6 @@
-import { average, clamp } from "@/lib/pose/math";
-import type { ConfidenceStatus, ExerciseId, Landmark } from "@/lib/pose/types";
-
-const REQUIRED_BY_EXERCISE: Record<ExerciseId, number[]> = {
-  squat: [11, 12, 23, 24, 25, 26, 27, 28],
-  pushup: [11, 13, 15, 23, 25, 27],
-  lunge: [11, 12, 23, 24, 25, 26, 27, 28],
-  bicep_curl: [11, 12, 13, 14, 15, 16, 23, 24],
-  jumping_jack: [11, 12, 15, 16, 23, 24, 27, 28],
-  plank: [11, 13, 15, 23, 25, 27],
-  warrior: [11, 12, 15, 16, 23, 24, 25, 27],
-  dance_basic: [11, 12, 15, 16, 23, 24, 25, 26, 27, 28],
-};
+import { average, clamp, distance } from "@/lib/pose/math";
+import { evaluateFrameQuality } from "@/lib/pose/quality";
+import type { ConfidenceStatus, ExerciseId, Landmark, TrackingFrame } from "@/lib/pose/types";
 
 export function smoothLandmarks(previous: Landmark[] | null, next: Landmark[], alpha = 0.35) {
   if (!previous || previous.length !== next.length) return next;
@@ -26,47 +16,142 @@ export function smoothLandmarks(previous: Landmark[] | null, next: Landmark[], a
   });
 }
 
-export function evaluateConfidence(landmarks: Landmark[], exerciseId: ExerciseId): ConfidenceStatus {
-  const requiredPoints = REQUIRED_BY_EXERCISE[exerciseId];
-  const visibilities = requiredPoints.map((index) => landmarks[index]?.visibility ?? 0);
-  const avgVisibility = average(visibilities);
-  const fullBodyVisible = visibilities.every((visibility) => visibility > 0.45);
+export function metricVisibility(landmarks: Landmark[], indices: number[]) {
+  const visibilities = indices.map((index) => landmarks[index]?.visibility ?? 0);
+  return {
+    average: average(visibilities),
+    minimum: visibilities.length ? Math.min(...visibilities) : 0,
+    visibilities,
+  };
+}
 
-  const xs = requiredPoints.map((index) => landmarks[index]?.x).filter((value): value is number => typeof value === "number");
-  const ys = requiredPoints.map((index) => landmarks[index]?.y).filter((value): value is number => typeof value === "number");
+export function isMetricReliable(
+  landmarks: Landmark[],
+  indices: number[],
+  options: {
+    minAverage?: number;
+    minPoint?: number;
+  } = {},
+) {
+  const { minAverage = 0.62, minPoint = 0.45 } = options;
+  const visibility = metricVisibility(landmarks, indices);
+  return visibility.average >= minAverage && visibility.minimum >= minPoint;
+}
 
-  const minX = xs.length ? Math.min(...xs) : 0;
-  const maxX = xs.length ? Math.max(...xs) : 1;
-  const minY = ys.length ? Math.min(...ys) : 0;
-  const maxY = ys.length ? Math.max(...ys) : 1;
+export function inferDominantSide(landmarks: Landmark[]) {
+  const left = average([
+    landmarks[11]?.visibility ?? 0,
+    landmarks[13]?.visibility ?? 0,
+    landmarks[15]?.visibility ?? 0,
+    landmarks[23]?.visibility ?? 0,
+    landmarks[25]?.visibility ?? 0,
+    landmarks[27]?.visibility ?? 0,
+  ]);
+  const right = average([
+    landmarks[12]?.visibility ?? 0,
+    landmarks[14]?.visibility ?? 0,
+    landmarks[16]?.visibility ?? 0,
+    landmarks[24]?.visibility ?? 0,
+    landmarks[26]?.visibility ?? 0,
+    landmarks[28]?.visibility ?? 0,
+  ]);
+  if (Math.abs(left - right) <= 0.08) return "both";
+  return left > right ? "left" : "right";
+}
 
-  const width = maxX - minX;
-  const height = maxY - minY;
-  const centerX = (minX + maxX) / 2;
-  const centered = Math.abs(centerX - 0.5) < 0.24;
-  const tooClose = width > 0.82 || height > 0.95;
-  const tooFar = width < 0.16 || height < 0.30;
+export function buildReliabilityMap(landmarks: Landmark[]) {
+  return {
+    fullBody: isMetricReliable(landmarks, [11, 12, 23, 24, 25, 26, 27, 28], { minAverage: 0.62, minPoint: 0.45 }),
+    leftArm: isMetricReliable(landmarks, [11, 13, 15], { minAverage: 0.65, minPoint: 0.48 }),
+    rightArm: isMetricReliable(landmarks, [12, 14, 16], { minAverage: 0.65, minPoint: 0.48 }),
+    trunk: isMetricReliable(landmarks, [11, 12, 23, 24], { minAverage: 0.64, minPoint: 0.45 }),
+    lowerBody: isMetricReliable(landmarks, [23, 24, 25, 26, 27, 28], { minAverage: 0.64, minPoint: 0.45 }),
+    wrists: isMetricReliable(landmarks, [15, 16], { minAverage: 0.68, minPoint: 0.52 }),
+    knees: isMetricReliable(landmarks, [25, 26], { minAverage: 0.66, minPoint: 0.48 }),
+    ankles: isMetricReliable(landmarks, [27, 28], { minAverage: 0.64, minPoint: 0.45 }),
+  };
+}
 
-  let message = "Ready for calibration";
-  if (!fullBodyVisible) {
-    message = "Show your full body in frame";
-  } else if (!centered) {
-    message = "Center yourself in the frame";
-  } else if (tooClose) {
-    message = "Step back slightly";
-  } else if (tooFar) {
-    message = "Move a bit closer";
-  } else if (avgVisibility < 0.6) {
-    message = "Improve lighting or camera angle";
+export function estimateMotion(previous: Landmark[] | null, next: Landmark[]) {
+  if (!previous || previous.length !== next.length) return 0;
+  const keypoints = [11, 12, 15, 16, 23, 24, 25, 26];
+  return average(
+    keypoints.map((index) => {
+      const a = previous[index];
+      const b = next[index];
+      return distance(a, b) * 100;
+    }),
+  );
+}
+
+export function buildTrackingFrame(options: {
+  exerciseId: ExerciseId;
+  rawLandmarks: Landmark[];
+  worldLandmarks?: Landmark[];
+  previousSmoothed: Landmark[] | null;
+  timestampMs: number;
+  frameIndex: number;
+  fps: number;
+  brightness: number;
+  motion?: number;
+}): TrackingFrame {
+  const smoothedLandmarks = smoothLandmarks(options.previousSmoothed, options.rawLandmarks);
+  const avgVisibility = average(smoothedLandmarks.map((landmark) => landmark.visibility ?? 0));
+  const motion = typeof options.motion === "number" ? options.motion : estimateMotion(options.previousSmoothed, smoothedLandmarks);
+  const quality = evaluateFrameQuality({
+    exerciseId: options.exerciseId,
+    landmarks: smoothedLandmarks,
+    worldLandmarks: options.worldLandmarks ?? [],
+    fps: options.fps,
+    brightness: options.brightness,
+    motion,
+  });
+
+  return {
+    timestampMs: options.timestampMs,
+    frameIndex: options.frameIndex,
+    fps: options.fps,
+    rawLandmarks: options.rawLandmarks,
+    smoothedLandmarks,
+    worldLandmarks: options.worldLandmarks ?? [],
+    avgVisibility: clamp(avgVisibility, 0, 1),
+    posePresence: clamp(avgVisibility, 0, 1),
+    trackingConfidence: clamp(Math.min(avgVisibility, quality.ready ? 1 : 0.92), 0, 1),
+    frameQuality: quality.frameQuality,
+    frameQualityMessage: quality.message,
+    view: quality.view,
+    viewMessage: quality.allowedViews.includes(quality.view) ? "Camera angle is valid." : quality.message,
+    brightness: options.brightness,
+    motion,
+    reliability: buildReliabilityMap(smoothedLandmarks),
+    dominantSide: inferDominantSide(smoothedLandmarks),
+  };
+}
+
+export function evaluateConfidence(input: TrackingFrame | Landmark[], exerciseId?: ExerciseId): ConfidenceStatus {
+  if (Array.isArray(input)) {
+    if (!exerciseId) {
+      throw new Error("exerciseId is required when evaluating raw landmarks");
+    }
+    return evaluateFrameQuality({
+      exerciseId,
+      landmarks: input,
+      worldLandmarks: [],
+      fps: 24,
+      brightness: 80,
+      motion: 0,
+    });
   }
 
   return {
-    ready: fullBodyVisible && centered && !tooClose && !tooFar && avgVisibility >= 0.6,
-    avgVisibility: clamp(avgVisibility, 0, 1),
-    fullBodyVisible,
-    centered,
-    tooFar,
-    tooClose,
-    message,
+    ...evaluateFrameQuality({
+      exerciseId: exerciseId ?? "squat",
+      landmarks: input.smoothedLandmarks,
+      worldLandmarks: input.worldLandmarks,
+      fps: input.fps,
+      brightness: input.brightness,
+      motion: input.motion,
+    }),
+    avgVisibility: input.avgVisibility,
   };
 }

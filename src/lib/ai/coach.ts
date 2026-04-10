@@ -718,6 +718,8 @@ export async function generateCoachFeedback(input: {
   repsSoFar: number;
   phase?: string;
   confidence?: number;
+  issueSignature?: string;
+  triggerReason?: "issue_changed" | "score_drop" | "phase_milestone" | "manual";
   currentIssues: string[];
   currentMetrics: Array<{ name: string; score: number; detail: string; value?: number; target?: string }>;
   recentScores: Array<{ form: number; rom: number; tempo: number; safety: number }>;
@@ -757,7 +759,8 @@ Prioritize in order: injury risk -> elbow path -> shoulder shrug -> torso swing 
 Name the exact body part and exact mechanic that is failing.
 Prefer language like: "left elbow drifting", "both shoulders shrugging", "right wrist folding", "torso swinging", "soft lockout", "full extension", "finish the squeeze".
 If the cue is good news, be specific about what is clean.
-Never be generic. Vary phrasing from prior cues and avoid repeating the same wording.`
+Never be generic.
+If issueSignature indicates the same mechanic as before, keep the same mechanic focus instead of inventing a new cue.`
           : isDance
             ? `You are an expert dance coach focused on precise posture and timing feedback.
 Return exactly one short coaching cue (max 22 words).
@@ -765,7 +768,8 @@ Prioritize in order: injury risk -> knees locking -> torso leaning -> shoulder o
 Name the exact body part and exact mechanic that is failing.
 Prefer language like: "left wrist dropping", "hips tilting right", "knees locking", "torso leaning left", "late to the hit", "hold the frame wider".
 If the cue is good news, be specific about what is clean.
-Never be generic. Vary phrasing from prior cues and avoid repeating the same wording.`
+Never be generic.
+If issueSignature indicates the same mechanic as before, keep the same mechanic focus instead of inventing a new cue.`
             : "You are a real-time workout coach. Respond with one short coaching cue. If an issue is safety-related, lead with safety and keep it direct.",
       },
       {
@@ -774,6 +778,8 @@ Never be generic. Vary phrasing from prior cues and avoid repeating the same wor
 Reps so far: ${input.repsSoFar}
 Current phase: ${input.phase ?? "unknown"}
 Tracking confidence: ${typeof input.confidence === "number" ? `${Math.round(input.confidence * 100)}%` : "unknown"}
+Issue signature: ${input.issueSignature ?? "none"}
+Trigger reason: ${input.triggerReason ?? "manual"}
 Current issues: ${input.currentIssues.join(", ") || "none"}
 Current metrics:
 ${metricSummary || "none"}

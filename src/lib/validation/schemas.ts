@@ -71,6 +71,8 @@ export const coachFeedbackInputSchema = z.object({
   repsSoFar: z.number().int().min(0),
   phase: z.string().max(40).optional(),
   confidence: z.number().min(0).max(1).optional(),
+  issueSignature: z.string().max(240).optional(),
+  triggerReason: z.enum(["issue_changed", "score_drop", "phase_milestone", "manual"]).optional(),
   currentIssues: z.array(z.string()).max(10).default([]),
   currentMetrics: z
     .array(
@@ -195,6 +197,56 @@ export const workoutSessionInputSchema = z.object({
       }),
     )
     .default([]),
+  sessionAnalysis: z
+    .object({
+      frameQualityStats: z.record(z.string(), z.number().int().min(0)).default({}),
+      issueHistory: z
+        .array(
+          z.object({
+            timestampMs: z.number().int().min(0),
+            signature: z.string().min(1).max(240),
+            message: z.string().min(1).max(500),
+            severity: z.enum(["critical", "warning", "info"]),
+          }),
+        )
+        .default([]),
+      phaseHistory: z
+        .array(
+          z.object({
+            timestampMs: z.number().int().min(0),
+            phase: z.string().min(1).max(40),
+          }),
+        )
+        .default([]),
+      telemetry: z
+        .array(
+          z.object({
+            timestampMs: z.number().int().min(0),
+            type: z.string().min(1).max(80),
+            message: z.string().min(1).max(500),
+            meta: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
+          }),
+        )
+        .default([]),
+      postSet: z
+        .object({
+          stabilityAverage: z.number().min(0).max(100).default(0),
+          asymmetryAverage: z.number().min(0).max(100).default(0),
+          tempoDrift: z.number().min(-100).max(100).default(0),
+          fatigueDrop: z.number().min(-100).max(100).default(0),
+          consistencyAverage: z.number().min(0).max(100).default(0),
+          recurringIssues: z.array(z.string().min(1).max(500)).default([]),
+        })
+        .default({
+          stabilityAverage: 0,
+          asymmetryAverage: 0,
+          tempoDrift: 0,
+          fatigueDrop: 0,
+          consistencyAverage: 0,
+          recurringIssues: [],
+        }),
+    })
+    .optional(),
   feedbackEvents: z
     .array(
       z.object({

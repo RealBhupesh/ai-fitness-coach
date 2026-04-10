@@ -80,12 +80,15 @@ export function AICoachChat({ className }: { className?: string }) {
         body: JSON.stringify({ message }),
       });
       const data = await response.json();
+      const assistantText = response.ok
+        ? (data.message ?? "I could not generate a reply right now.")
+        : (data.error ? `Coach error: ${data.error}` : "I could not generate a reply right now.");
       setMessages((current) => [
         ...current,
         {
           id: `assistant-${Date.now()}`,
           role: "assistant",
-          content: data.message ?? "I could not generate a reply right now.",
+          content: assistantText,
           createdAt: new Date().toISOString(),
         },
       ]);
