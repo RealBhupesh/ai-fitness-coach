@@ -413,13 +413,13 @@ function getBicepRawPhase(input: Landmark[] | TrackingFrame, previousPhase = "id
     return elbowAngle <= 142 ? "curling" : "bottom";
   }
   if (previousPhase === "curling") {
-    if (elbowAngle <= 58) return "top";
-    if (elbowAngle >= 154) return "bottom";
+    if (elbowAngle <= 68) return "top";
+    if (elbowAngle >= 150) return "bottom";
     return "curling";
   }
 
-  if (elbowAngle <= 58) return "top";
-  if (elbowAngle < 150) return "curling";
+  if (elbowAngle <= 68) return "top";
+  if (elbowAngle < 146) return "curling";
   return "bottom";
 }
 
@@ -432,11 +432,11 @@ function getSquatRawPhase(input: Landmark[] | TrackingFrame, previousPhase = "id
   }
   if (previousPhase === "rising") {
     if (kneeAngle >= 160) return "top";
-    if (kneeAngle <= 108) return "bottom";
+    if (kneeAngle <= 115) return "bottom";
     return "rising";
   }
   if (previousPhase === "lowering") {
-    if (kneeAngle <= 108) return "bottom";
+    if (kneeAngle <= 115) return "bottom";
     if (kneeAngle >= 160) return "top";
     return "lowering";
   }
@@ -444,7 +444,7 @@ function getSquatRawPhase(input: Landmark[] | TrackingFrame, previousPhase = "id
     return kneeAngle < 154 ? "lowering" : "top";
   }
 
-  if (kneeAngle <= 108) return "bottom";
+  if (kneeAngle <= 115) return "bottom";
   if (kneeAngle < 154) return "lowering";
   return "top";
 }
@@ -1027,38 +1027,38 @@ export function getPhaseForExercise(exerciseId: ExerciseId, input: Landmark[] | 
 
   if (exerciseId === "lunge") {
     const kneeAngle = angle(trackedHip, trackedKnee, trackedAnkle);
-    if (previousPhase === "bottom") return kneeAngle > 116 ? "rising" : "bottom";
+    if (previousPhase === "bottom") return kneeAngle > 118 ? "rising" : "bottom";
     if (previousPhase === "rising") {
-      if (kneeAngle >= 156) return "top";
-      if (kneeAngle <= 102) return "bottom";
+      if (kneeAngle >= 150) return "top";
+      if (kneeAngle <= 112) return "bottom";
       return "rising";
     }
     if (previousPhase === "lowering") {
-      if (kneeAngle <= 102) return "bottom";
-      if (kneeAngle >= 156) return "top";
+      if (kneeAngle <= 112) return "bottom";
+      if (kneeAngle >= 150) return "top";
       return "lowering";
     }
-    if (previousPhase === "top") return kneeAngle < 148 ? "lowering" : "top";
-    if (kneeAngle < 102) return "bottom";
-    if (kneeAngle < 148) return "lowering";
+    if (previousPhase === "top") return kneeAngle < 144 ? "lowering" : "top";
+    if (kneeAngle < 112) return "bottom";
+    if (kneeAngle < 144) return "lowering";
     return "top";
   }
 
   if (exerciseId === "pushup") {
     const elbowAngle = angle(trackedShoulder, trackedElbow, trackedWrist);
-    if (previousPhase === "bottom") return elbowAngle > 102 ? "rising" : "bottom";
+    if (previousPhase === "bottom") return elbowAngle > 105 ? "rising" : "bottom";
     if (previousPhase === "rising") {
       if (elbowAngle >= 162) return "top";
-      if (elbowAngle <= 86) return "bottom";
+      if (elbowAngle <= 98) return "bottom";
       return "rising";
     }
     if (previousPhase === "lowering") {
-      if (elbowAngle <= 86) return "bottom";
+      if (elbowAngle <= 98) return "bottom";
       if (elbowAngle >= 162) return "top";
       return "lowering";
     }
     if (previousPhase === "top") return elbowAngle < 150 ? "lowering" : "top";
-    if (elbowAngle < 86) return "bottom";
+    if (elbowAngle < 98) return "bottom";
     if (elbowAngle < 150) return "lowering";
     return "top";
   }
@@ -1068,17 +1068,18 @@ export function getPhaseForExercise(exerciseId: ExerciseId, input: Landmark[] | 
   }
 
   if (exerciseId === "jumping_jack") {
-    const wristSpread = distance(trackedWrist, rightWrist);
-    const ankleSpread = distance(trackedAnkle, rightAnkle);
+    const shoulderWidth = Math.max(distance(LM(landmarks, 11), LM(landmarks, 12)), 0.05);
+    const wristSpread = distance(trackedWrist, rightWrist) / shoulderWidth;
+    const ankleSpread = distance(trackedAnkle, rightAnkle) / shoulderWidth;
     if (previousPhase === "open") {
-      return wristSpread < 0.4 || ankleSpread < 0.24 ? "closing" : "open";
+      return wristSpread < 1.6 || ankleSpread < 1.1 ? "closing" : "open";
     }
     if (previousPhase === "closing") {
-      if (wristSpread < 0.25 && ankleSpread < 0.16) return "closed";
-      if (wristSpread > 0.48 && ankleSpread > 0.32) return "open";
+      if (wristSpread < 1.25 && ankleSpread < 0.9) return "closed";
+      if (wristSpread > 1.8 && ankleSpread > 1.2) return "open";
       return "closing";
     }
-    return wristSpread > 0.48 && ankleSpread > 0.32 ? "open" : "closed";
+    return wristSpread > 1.8 && ankleSpread > 1.2 ? "open" : "closed";
   }
 
   return "hold";

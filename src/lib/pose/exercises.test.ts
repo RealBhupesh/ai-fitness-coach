@@ -142,4 +142,41 @@ describe("pose exercise tracking", () => {
     expect(hipMetric?.score).toBeLessThan(78);
     expect(analysis.corrections.some((detail) => /hips centered|shifting/i.test(detail))).toBe(true);
   });
+
+  it("counts jumping jack reps correctly and is invariant to camera distance", () => {
+    function buildJjackFrame(isOpen: boolean, scale: number) {
+      const landmarks = createLandmarks();
+      const shoulderWidth = 0.2 * scale;
+      landmarks[11] = { x: 0.5 - shoulderWidth / 2, y: 0.3, visibility: 0.99 };
+      landmarks[12] = { x: 0.5 + shoulderWidth / 2, y: 0.3, visibility: 0.99 };
+      
+      if (isOpen) {
+        landmarks[15] = { x: 0.5 - 1.3 * shoulderWidth, y: 0.1, visibility: 0.99 };
+        landmarks[16] = { x: 0.5 + 1.3 * shoulderWidth, y: 0.1, visibility: 0.99 };
+        landmarks[27] = { x: 0.5 - 1.0 * shoulderWidth, y: 0.8, visibility: 0.99 };
+        landmarks[28] = { x: 0.5 + 1.0 * shoulderWidth, y: 0.8, visibility: 0.99 };
+      } else {
+        landmarks[15] = { x: 0.5 - 0.55 * shoulderWidth, y: 0.6, visibility: 0.99 };
+        landmarks[16] = { x: 0.5 + 0.55 * shoulderWidth, y: 0.6, visibility: 0.99 };
+        landmarks[27] = { x: 0.5 - 0.25 * shoulderWidth, y: 0.8, visibility: 0.99 };
+        landmarks[28] = { x: 0.5 + 0.25 * shoulderWidth, y: 0.8, visibility: 0.99 };
+      }
+      return landmarks;
+    }
+
+    const closeFrames = [
+      ...Array.from({ length: 8 }, () => buildJjackFrame(false, 1.0)),
+      ...Array.from({ length: 8 }, () => buildJjackFrame(true, 1.0)),
+      ...Array.from({ length: 8 }, () => buildJjackFrame(false, 1.0)),
+    ];
+    
+    const farFrames = [
+      ...Array.from({ length: 8 }, () => buildJjackFrame(false, 0.5)),
+      ...Array.from({ length: 8 }, () => buildJjackFrame(true, 0.5)),
+      ...Array.from({ length: 8 }, () => buildJjackFrame(false, 0.5)),
+    ];
+
+    expect(countReps("jumping_jack", closeFrames)).toBe(1);
+    expect(countReps("jumping_jack", farFrames)).toBe(1);
+  });
 });
