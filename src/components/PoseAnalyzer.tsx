@@ -286,6 +286,8 @@ interface ThreeHUDState {
   jointMeshes: Map<number, THREE.Mesh>;
   lineSegments: THREE.LineSegments;
   gridHelper: THREE.GridHelper;
+  cage?: THREE.LineSegments;
+  sparkGroups?: Map<number, THREE.Group>;
   initialized: boolean;
 }
 
@@ -297,8 +299,8 @@ function initThreeHUD(canvas: HTMLCanvasElement): ThreeHUDState {
   const scene = new THREE.Scene();
 
   const camera = new THREE.PerspectiveCamera(40, aspect, 0.1, 100);
-  camera.position.set(0, 0, 7.5);
-  camera.lookAt(0, 0, 0);
+  camera.position.set(0, 0.2, 7.8);
+  camera.lookAt(0, 0.2, -0.5);
 
   const renderer = new THREE.WebGLRenderer({
     canvas,
@@ -314,6 +316,18 @@ function initThreeHUD(canvas: HTMLCanvasElement): ThreeHUDState {
   gridHelper.position.z = -1;
   gridHelper.rotation.x = Math.PI / 18;
   scene.add(gridHelper);
+
+  // Futuristic Bounding cage wireframe cuboid enclosing the skeleton in 3D
+  const cageGeo = new THREE.BoxGeometry(4.8, 5.8, 3.8);
+  const cageEdges = new THREE.EdgesGeometry(cageGeo);
+  const cageMat = new THREE.LineBasicMaterial({
+    color: 0x0891b2,
+    transparent: true,
+    opacity: 0.35,
+  });
+  const cage = new THREE.LineSegments(cageEdges, cageMat);
+  cage.position.set(0, 0.2, -0.5);
+  scene.add(cage);
 
   const ambient = new THREE.AmbientLight(0xffffff, 0.95);
   scene.add(ambient);
@@ -333,6 +347,31 @@ function initThreeHUD(canvas: HTMLCanvasElement): ThreeHUDState {
     mesh.visible = false;
     scene.add(mesh);
     jointMeshes.set(idx, mesh);
+  });
+
+  // Small orbiting electron-like glowing sparkles surrounding active limbs
+  const sparkGroups = new Map<number, THREE.Group>();
+  const sparkJoints = [13, 14, 15, 16, 25, 26]; // elbows, wrists, knees
+  const sparkGeo = new THREE.SphereGeometry(0.035, 8, 8);
+  
+  sparkJoints.forEach((jointIdx) => {
+    const group = new THREE.Group();
+    scene.add(group);
+    sparkGroups.set(jointIdx, group);
+    
+    for (let i = 0; i < 4; i++) {
+      const sparkMat = new THREE.MeshBasicMaterial({
+        color: 0x22d3ee,
+        transparent: true,
+        opacity: 0.85,
+      });
+      const spark = new THREE.Mesh(sparkGeo, sparkMat);
+      
+      const angle = (i / 4) * Math.PI * 2;
+      const radius = 0.22 + Math.random() * 0.08;
+      spark.position.set(Math.cos(angle) * radius, Math.sin(angle) * radius, (Math.random() - 0.5) * 0.1);
+      group.add(spark);
+    }
   });
 
   const boneMaterial = new THREE.LineBasicMaterial({
@@ -355,6 +394,8 @@ function initThreeHUD(canvas: HTMLCanvasElement): ThreeHUDState {
     jointMeshes,
     lineSegments,
     gridHelper,
+    cage,
+    sparkGroups,
     initialized: true,
   };
 }
@@ -370,13 +411,17 @@ function updateThreeHUD(
 ) {
   if (!threeState?.initialized || !landmarks?.length) return;
 
-  const { scene, camera, renderer, jointMeshes, lineSegments, gridHelper } = threeState;
+  const { scene, camera, renderer, jointMeshes, lineSegments, gridHelper, cage, sparkGroups } = threeState;
 
   const perfColor = score >= 88 ? 0x10b981 : score >= 72 ? 0xf59e0b : score >= 55 ? 0xf97316 : 0xf43f5e;
   const activeColor = streakCount >= 5 ? 0xd946ef : streakCount >= 3 ? 0x06b6d4 : perfColor;
 
   if (gridHelper && gridHelper.material) {
     (gridHelper.material as THREE.LineBasicMaterial).color.setHex(activeColor);
+  }
+
+  if (cage && cage.material) {
+    (cage.material as THREE.LineBasicMaterial).color.setHex(activeColor);
   }
 
   const scaleX = 7.2;
@@ -397,6 +442,27 @@ function updateThreeHUD(
       mesh.visible = false;
     }
   });
+
+  if (sparkGroups) {
+    sparkGroups.forEach((group, jointIdx) => {
+      const parentMesh = jointMeshes.get(jointIdx);
+      if (parentMesh && parentMesh.visible) {
+        group.visible = true;
+        group.position.copy(parentMesh.position);
+        
+        group.rotation.x += 0.025;
+        group.rotation.y += 0.035;
+
+        group.children.forEach((child) => {
+          if (child instanceof THREE.Mesh && child.material) {
+            (child.material as THREE.MeshBasicMaterial).color.setHex(activeColor);
+          }
+        });
+      } else {
+        group.visible = false;
+      }
+    });
+  }
 
   const posArr = lineSegments.geometry.attributes.position.array as Float32Array;
   let arrIdx = 0;
@@ -422,10 +488,16 @@ function updateThreeHUD(
   lineSegments.geometry.attributes.position.needsUpdate = true;
   (lineSegments.material as THREE.LineBasicMaterial).color.setHex(activeColor);
 
-  const time = Date.now() * 0.0008;
-  camera.position.x = Math.sin(time * 0.7) * 0.55;
-  camera.position.y = Math.cos(time * 0.4) * 0.25;
-  camera.lookAt(0, 0, 0);
+  // Dynamic Camera Orbit Sway: Orbit left and right by +/- 25 degrees, and sway pitch!
+  // This produces a fully visible, beautiful 3D depth parallax where the floor grid, 
+  // coordinates cage, and skeleton rotate clearly inside the camera box.
+  const time = Date.now() * 0.0006;
+  const radius = 7.8;
+  const angleRad = Math.sin(time * 0.8) * 0.45; // Orbit left and right
+  camera.position.x = Math.sin(angleRad) * radius;
+  camera.position.z = Math.cos(angleRad) * radius;
+  camera.position.y = Math.cos(time * 0.4) * 0.35 + 0.2; // Pitch sway
+  camera.lookAt(0, 0.2, -0.5);
 
   renderer.render(scene, camera);
 }
