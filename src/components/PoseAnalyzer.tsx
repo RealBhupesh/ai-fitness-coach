@@ -307,7 +307,7 @@ function draw(
   if (exerciseId === "squat" && analysis) {
     const leftKnee = landmarks[25];
     const rightKnee = landmarks[26];
-    if (leftKnee && rightKnee && leftKnee.visibility > 0.5 && rightKnee.visibility > 0.5) {
+    if (leftKnee && rightKnee && (leftKnee.visibility ?? 0) > 0.5 && (rightKnee.visibility ?? 0) > 0.5) {
       const avgKneeY = ((leftKnee.y + rightKnee.y) / 2) * canvas.height;
       ctx.strokeStyle = "rgba(16, 185, 129, 0.25)";
       ctx.lineWidth = 2;
@@ -432,33 +432,36 @@ function draw(
 
   // Helper to draw clean angle readouts on canvas
   function drawAngleHUD(aIdx: number, bIdx: number, cIdx: number, label: string) {
+    if (!landmarks) return;
     const a = landmarks[aIdx];
     const b = landmarks[bIdx];
     const c = landmarks[cIdx];
-    if (a && b && c && a.visibility > 0.45 && b.visibility > 0.5 && c.visibility > 0.45) {
+    if (a && b && c && (a.visibility ?? 0) > 0.45 && (b.visibility ?? 0) > 0.5 && (c.visibility ?? 0) > 0.45) {
       const ang = angle(a, b, c);
-      const bx = b.x * canvas.width;
-      const by = b.y * canvas.height;
+      const bx = b.x * (canvas?.width ?? 1280);
+      const by = b.y * (canvas?.height ?? 720);
 
-      ctx.fillStyle = "rgba(9, 9, 11, 0.72)";
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
-      ctx.lineWidth = 1;
-      
-      const boxW = 54;
-      const boxH = 30;
-      ctx.beginPath();
-      ctx.roundRect(bx - boxW / 2, by - 38, boxW, boxH, 6);
-      ctx.fill();
-      ctx.stroke();
+      if (ctx) {
+        ctx.fillStyle = "rgba(9, 9, 11, 0.72)";
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
+        ctx.lineWidth = 1;
+        
+        const boxW = 54;
+        const boxH = 30;
+        ctx.beginPath();
+        ctx.roundRect(bx - boxW / 2, by - 38, boxW, boxH, 6);
+        ctx.fill();
+        ctx.stroke();
 
-      ctx.fillStyle = "#38bdf8";
-      ctx.font = "bold 10px Inter, sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText(`${Math.round(ang)}°`, bx, by - 24);
+        ctx.fillStyle = "#38bdf8";
+        ctx.font = "bold 10px Inter, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(`${Math.round(ang)}°`, bx, by - 24);
 
-      ctx.fillStyle = "#a1a1aa";
-      ctx.font = "bold 7px Inter, sans-serif";
-      ctx.fillText(label, bx, by - 12);
+        ctx.fillStyle = "#a1a1aa";
+        ctx.font = "bold 7px Inter, sans-serif";
+        ctx.fillText(label, bx, by - 12);
+      }
     }
   }
 
