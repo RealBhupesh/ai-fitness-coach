@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import * as THREE from "three";
 import { Brain, CheckCircle2, Clipboard, GripVertical, Maximize2, Mic, Minimize2, Monitor, RotateCcw, Smartphone, Target, Timer, Volume2, VolumeX, Waves, XCircle, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { SessionSetupCard } from "@/components/coach/SessionSetupCard";
@@ -278,6 +279,157 @@ function buildTeacherReport(evidence: CurlSessionEvidence | null, memory: CurlCo
     .join("\n");
 }
 
+interface ThreeHUDState {
+  scene: THREE.Scene;
+  camera: THREE.PerspectiveCamera;
+  renderer: THREE.WebGLRenderer;
+  jointMeshes: Map<number, THREE.Mesh>;
+  lineSegments: THREE.LineSegments;
+  gridHelper: THREE.GridHelper;
+  initialized: boolean;
+}
+
+function initThreeHUD(canvas: HTMLCanvasElement): ThreeHUDState {
+  const width = canvas.clientWidth || 640;
+  const height = canvas.clientHeight || 360;
+  const aspect = width / height;
+
+  const scene = new THREE.Scene();
+
+  const camera = new THREE.PerspectiveCamera(40, aspect, 0.1, 100);
+  camera.position.set(0, 0, 7.5);
+  camera.lookAt(0, 0, 0);
+
+  const renderer = new THREE.WebGLRenderer({
+    canvas,
+    alpha: true,
+    antialias: true,
+    powerPreference: "high-performance",
+  });
+  renderer.setSize(width, height, false);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+  const gridHelper = new THREE.GridHelper(14, 28, 0x06b6d4, 0x1e293b);
+  gridHelper.position.y = -2.4;
+  gridHelper.position.z = -1;
+  gridHelper.rotation.x = Math.PI / 18;
+  scene.add(gridHelper);
+
+  const ambient = new THREE.AmbientLight(0xffffff, 0.95);
+  scene.add(ambient);
+
+  const jointMeshes = new Map<number, THREE.Mesh>();
+  const jointsToRender = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
+  
+  const sphereGeo = new THREE.SphereGeometry(0.12, 16, 16);
+
+  jointsToRender.forEach((idx) => {
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0x06b6d4,
+      transparent: true,
+      opacity: 0.95,
+    });
+    const mesh = new THREE.Mesh(sphereGeo, mat);
+    mesh.visible = false;
+    scene.add(mesh);
+    jointMeshes.set(idx, mesh);
+  });
+
+  const boneMaterial = new THREE.LineBasicMaterial({
+    color: 0x0891b2,
+    transparent: true,
+    opacity: 0.8,
+  });
+
+  const lineGeo = new THREE.BufferGeometry();
+  const linePositions = new Float32Array(POSE_CONNECTIONS.length * 6);
+  lineGeo.setAttribute("position", new THREE.BufferAttribute(linePositions, 3));
+  
+  const lineSegments = new THREE.LineSegments(lineGeo, boneMaterial);
+  scene.add(lineSegments);
+
+  return {
+    scene,
+    camera,
+    renderer,
+    jointMeshes,
+    lineSegments,
+    gridHelper,
+    initialized: true,
+  };
+}
+
+function updateThreeHUD(
+  threeState: ThreeHUDState | null,
+  landmarks: Landmark[] | null,
+  score: number,
+  streakCount: number,
+  mirror: boolean,
+  exerciseId: ExerciseId,
+  analysis?: FrameAnalysis
+) {
+  if (!threeState?.initialized || !landmarks?.length) return;
+
+  const { scene, camera, renderer, jointMeshes, lineSegments, gridHelper } = threeState;
+
+  const perfColor = score >= 88 ? 0x10b981 : score >= 72 ? 0xf59e0b : score >= 55 ? 0xf97316 : 0xf43f5e;
+  const activeColor = streakCount >= 5 ? 0xd946ef : streakCount >= 3 ? 0x06b6d4 : perfColor;
+
+  if (gridHelper && gridHelper.material) {
+    (gridHelper.material as THREE.LineBasicMaterial).color.setHex(activeColor);
+  }
+
+  const scaleX = 7.2;
+  const scaleY = 7.2;
+  const scaleZ = 5.0;
+
+  jointMeshes.forEach((mesh, idx) => {
+    const pt = landmarks[idx];
+    if (pt && (pt.visibility ?? 0) > 0.4) {
+      mesh.visible = true;
+      const adjustedX = mirror ? (1.5 - pt.x - 1.0) : (pt.x - 0.5);
+      mesh.position.x = adjustedX * scaleX;
+      mesh.position.y = (0.5 - pt.y) * scaleY;
+      mesh.position.z = -(pt.z ?? 0) * scaleZ;
+
+      (mesh.material as THREE.MeshBasicMaterial).color.setHex(activeColor);
+    } else {
+      mesh.visible = false;
+    }
+  });
+
+  const posArr = lineSegments.geometry.attributes.position.array as Float32Array;
+  let arrIdx = 0;
+
+  for (const [a, b] of POSE_CONNECTIONS) {
+    const startMesh = jointMeshes.get(a);
+    const endMesh = jointMeshes.get(b);
+
+    if (startMesh?.visible && endMesh?.visible) {
+      posArr[arrIdx++] = startMesh.position.x;
+      posArr[arrIdx++] = startMesh.position.y;
+      posArr[arrIdx++] = startMesh.position.z;
+
+      posArr[arrIdx++] = endMesh.position.x;
+      posArr[arrIdx++] = endMesh.position.y;
+      posArr[arrIdx++] = endMesh.position.z;
+    } else {
+      posArr[arrIdx++] = 0; posArr[arrIdx++] = 0; posArr[arrIdx++] = 0;
+      posArr[arrIdx++] = 0; posArr[arrIdx++] = 0; posArr[arrIdx++] = 0;
+    }
+  }
+
+  lineSegments.geometry.attributes.position.needsUpdate = true;
+  (lineSegments.material as THREE.LineBasicMaterial).color.setHex(activeColor);
+
+  const time = Date.now() * 0.0008;
+  camera.position.x = Math.sin(time * 0.7) * 0.55;
+  camera.position.y = Math.cos(time * 0.4) * 0.25;
+  camera.lookAt(0, 0, 0);
+
+  renderer.render(scene, camera);
+}
+
 function draw(
   canvas: HTMLCanvasElement | null,
   video: HTMLVideoElement | null,
@@ -285,7 +437,8 @@ function draw(
   score: number,
   mirror: boolean,
   exerciseId?: ExerciseId,
-  analysis?: FrameAnalysis
+  analysis?: FrameAnalysis,
+  skipSkeleton2D = false
 ) {
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
@@ -330,8 +483,9 @@ function draw(
     }
   }
 
-  // Draw HUD lines (bones) with localized color highlights based on joint metrics!
-  ctx.lineWidth = 4.5;
+  if (!skipSkeleton2D) {
+    // Draw HUD lines (bones) with localized color highlights based on joint metrics!
+    ctx.lineWidth = 4.5;
   for (const [a, b] of POSE_CONNECTIONS) {
     const start = landmarks[a];
     const end = landmarks[b];
@@ -433,6 +587,7 @@ function draw(
         }
       }
     }
+  }
   }
 
   // Helper to draw clean angle readouts on canvas
@@ -617,6 +772,38 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   const [replayFrameIndex, setReplayFrameIndex] = useState(0);
   const replayOverlayRef = useRef<HTMLCanvasElement | null>(null);
   const landmarksHistoryRef = useRef<Array<{ landmarks: Landmark[], analysis: FrameAnalysis }>>([]);
+
+  const [hudMode, setHudMode] = useState<"2d" | "3d">("2d");
+  const threeCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const threeStateRef = useRef<ThreeHUDState | null>(null);
+  const replayThreeCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const replayThreeStateRef = useRef<ThreeHUDState | null>(null);
+
+  const runDrawLoop = (landmarks: Landmark[] | null, score: number, exerciseId: ExerciseId, analysis?: FrameAnalysis) => {
+    if (hudMode === "3d") {
+      if (threeCanvasRef.current) {
+        if (overlayRef.current) {
+          threeCanvasRef.current.width = overlayRef.current.width;
+          threeCanvasRef.current.height = overlayRef.current.height;
+        }
+        if (!threeStateRef.current) {
+          threeStateRef.current = initThreeHUD(threeCanvasRef.current);
+        }
+        const targetW = overlayRef.current?.width || 640;
+        const targetH = overlayRef.current?.height || 360;
+        const state = threeStateRef.current;
+        if (state.renderer.domElement.width !== targetW || state.renderer.domElement.height !== targetH) {
+          state.camera.aspect = targetW / targetH;
+          state.camera.updateProjectionMatrix();
+          state.renderer.setSize(targetW, targetH, false);
+        }
+        updateThreeHUD(state, landmarks, score, streakCount, mirrorRef.current, exerciseId, analysis);
+      }
+      draw(overlayRef.current, videoRef.current, landmarks, score, mirrorRef.current, exerciseId, analysis, true);
+    } else {
+      draw(overlayRef.current, videoRef.current, landmarks, score, mirrorRef.current, exerciseId, analysis, false);
+    }
+  };
 
   const pushTelemetry = (event: SessionTelemetryEvent) => {
     recordTelemetry(sessionBufferRef.current, event);
@@ -869,7 +1056,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   const handleTrackingFrame = (trackingFrame: TrackingFrame | null) => {
     const currentId = exerciseIdRef.current;
     const currentExercise = exerciseRef.current;
-    draw(overlayRef.current, videoRef.current, trackingFrame?.smoothedLandmarks ?? null, analysisRef.current.overall, mirrorRef.current, currentId, analysisRef.current);
+    runDrawLoop(trackingFrame?.smoothedLandmarks ?? null, analysisRef.current.overall, currentId, analysisRef.current);
 
     if (!trackingFrame?.smoothedLandmarks?.length) {
       const lost = { ...EMPTY_CONFIDENCE(currentId), message: "Camera lost. Step back into frame.", reasons: ["Camera lost. Step back into frame."] };
@@ -918,7 +1105,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       }
       showStatus(gate.message);
       setTrackingPausedReason(null);
-      draw(overlayRef.current, videoRef.current, trackingFrame.smoothedLandmarks, 80, mirrorRef.current, currentId);
+      runDrawLoop(trackingFrame.smoothedLandmarks, 80, currentId);
       return;
     }
 
@@ -1007,7 +1194,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     const estimatedCalories = Math.round((elapsedSeconds / 60) * (currentExercise.category === "dance" || currentExercise.id === "jumping_jack" ? 8.5 : 6.5));
     setCalories(estimatedCalories);
     caloriesRef.current = estimatedCalories;
-    draw(overlayRef.current, videoRef.current, trackingFrame.smoothedLandmarks, resolved.overall, mirrorRef.current, currentId, resolved);
+    runDrawLoop(trackingFrame.smoothedLandmarks, resolved.overall, currentId, resolved);
 
     const liveCue = selectFeedbackCue(currentId, resolved, safety, trackingFrame.trackingConfidence, { coachLevel: coachLevelRef.current });
     const cueDecision = advanceFeedbackState(feedbackStateRef.current, shouldPauseScoring ? null : liveCue, {
@@ -1103,7 +1290,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     setCalibrationHoldProgress(0);
     calibrationHoldFramesRef.current = 0;
     voiceRef.current.stop();
-    draw(overlayRef.current, videoRef.current, null, 0, mirrorRef.current);
+    runDrawLoop(null, 0, exerciseIdRef.current);
   };
 
   const startSession = () => {
@@ -1390,6 +1577,74 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     return () => {
       stopCamera();
       voiceRef.current.stop();
+      if (threeStateRef.current) {
+        try {
+          threeStateRef.current.renderer.dispose();
+          threeStateRef.current.jointMeshes.forEach((mesh: any) => {
+            mesh.geometry.dispose();
+            if (mesh.material) {
+              if (Array.isArray(mesh.material)) {
+                mesh.material.forEach((m: any) => m.dispose());
+              } else {
+                mesh.material.dispose();
+              }
+            }
+          });
+          threeStateRef.current.lineSegments.geometry.dispose();
+          if (threeStateRef.current.lineSegments.material) {
+            const mat = threeStateRef.current.lineSegments.material;
+            if (Array.isArray(mat)) {
+              mat.forEach((m: any) => m.dispose());
+            } else {
+              mat.dispose();
+            }
+          }
+          threeStateRef.current.gridHelper.geometry.dispose();
+          if (threeStateRef.current.gridHelper.material) {
+            const mat = threeStateRef.current.gridHelper.material;
+            if (Array.isArray(mat)) {
+              mat.forEach((m: any) => m.dispose());
+            } else {
+              mat.dispose();
+            }
+          }
+        } catch {}
+        threeStateRef.current = null;
+      }
+      if (replayThreeStateRef.current) {
+        try {
+          replayThreeStateRef.current.renderer.dispose();
+          replayThreeStateRef.current.jointMeshes.forEach((mesh: any) => {
+            mesh.geometry.dispose();
+            if (mesh.material) {
+              if (Array.isArray(mesh.material)) {
+                mesh.material.forEach((m: any) => m.dispose());
+              } else {
+                mesh.material.dispose();
+              }
+            }
+          });
+          replayThreeStateRef.current.lineSegments.geometry.dispose();
+          if (replayThreeStateRef.current.lineSegments.material) {
+            const mat = replayThreeStateRef.current.lineSegments.material;
+            if (Array.isArray(mat)) {
+              mat.forEach((m: any) => m.dispose());
+            } else {
+              mat.dispose();
+            }
+          }
+          replayThreeStateRef.current.gridHelper.geometry.dispose();
+          if (replayThreeStateRef.current.gridHelper.material) {
+            const mat = replayThreeStateRef.current.gridHelper.material;
+            if (Array.isArray(mat)) {
+              mat.forEach((m: any) => m.dispose());
+            } else {
+              mat.dispose();
+            }
+          }
+        } catch {}
+        replayThreeStateRef.current = null;
+      }
     };
   }, []);
 
@@ -1453,10 +1708,40 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   useEffect(() => {
     if (running || !landmarksHistoryRef.current.length) return;
     const point = landmarksHistoryRef.current[replayFrameIndex];
-    if (point && replayOverlayRef.current) {
-      draw(replayOverlayRef.current, null, point.landmarks, point.analysis.overall, false, exerciseIdRef.current, point.analysis);
+    if (point) {
+      if (hudMode === "3d" && replayThreeCanvasRef.current && replayOverlayRef.current) {
+        replayThreeCanvasRef.current.width = replayOverlayRef.current.width || 640;
+        replayThreeCanvasRef.current.height = replayOverlayRef.current.height || 360;
+
+        if (!replayThreeStateRef.current) {
+          replayThreeStateRef.current = initThreeHUD(replayThreeCanvasRef.current);
+        }
+
+        const targetW = replayOverlayRef.current.width || 640;
+        const targetH = replayOverlayRef.current.height || 360;
+        const state = replayThreeStateRef.current;
+        if (state.renderer.domElement.width !== targetW || state.renderer.domElement.height !== targetH) {
+          state.camera.aspect = targetW / targetH;
+          state.camera.updateProjectionMatrix();
+          state.renderer.setSize(targetW, targetH, false);
+        }
+
+        updateThreeHUD(
+          state,
+          point.landmarks,
+          point.analysis.overall,
+          0,
+          false,
+          exerciseIdRef.current,
+          point.analysis
+        );
+
+        draw(replayOverlayRef.current, null, point.landmarks, point.analysis.overall, false, exerciseIdRef.current, point.analysis, true);
+      } else if (replayOverlayRef.current) {
+        draw(replayOverlayRef.current, null, point.landmarks, point.analysis.overall, false, exerciseIdRef.current, point.analysis, false);
+      }
     }
-  }, [replayFrameIndex, running]);
+  }, [replayFrameIndex, running, hudMode]);
 
   const qualityPercent = useMemo(() => Math.round(confidence.avgVisibility * 100), [confidence.avgVisibility]);
   const calibrationReady = cameraOn && confidence.ready && calibrationHoldProgress >= 18;
@@ -1516,7 +1801,10 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
         playsInline
         className={cn("h-full w-full object-cover", mirror && "scale-x-[-1]")}
       />
-      <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 h-full w-full" />
+      <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 h-full w-full z-20" />
+      {hudMode === "3d" && (
+        <canvas ref={threeCanvasRef} className="pointer-events-none absolute inset-0 h-full w-full z-10" />
+      )}
       {exerciseId === "bicep_curl" && curlReferenceOverlay ? (
         <div className="pointer-events-none absolute inset-0">
           <div className="absolute left-[18%] top-[28%] h-[42%] w-[22%] rounded-full border border-cyan-300/25" />
@@ -1538,6 +1826,31 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
         <Badge className={cn("border-none text-white", text(analysis.overall).replace("text-", "bg-").replace("400", "500/90"))}>
           Score {analysis.overall}
         </Badge>
+      </div>
+
+      <div className="absolute right-4 top-4 z-30 flex items-center gap-1 rounded-full border border-zinc-800 bg-zinc-950/80 p-0.5 backdrop-blur">
+        <button
+          onClick={() => setHudMode("2d")}
+          className={cn(
+            "rounded-full px-2.5 py-1 text-[10px] font-bold tracking-wider uppercase transition-all duration-300 cursor-pointer",
+            hudMode === "2d"
+              ? "bg-zinc-100 text-zinc-900 shadow-sm"
+              : "text-zinc-400 hover:text-zinc-200"
+          )}
+        >
+          2D HUD
+        </button>
+        <button
+          onClick={() => setHudMode("3d")}
+          className={cn(
+            "rounded-full px-2.5 py-1 text-[10px] font-bold tracking-wider uppercase transition-all duration-300 cursor-pointer",
+            hudMode === "3d"
+              ? "bg-cyan-500 text-white shadow-[0_0_10px_rgba(6,182,212,0.4)]"
+              : "text-zinc-400 hover:text-zinc-200"
+          )}
+        >
+          3D HUD
+        </button>
       </div>
 
       {trackingPausedReason ? (
@@ -2174,13 +2487,42 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
             {/* Visual Set Replay HUD */}
             {!running && landmarksHistoryRef.current.length > 0 && (
               <Card className="border-zinc-800 bg-zinc-950/70 text-zinc-100 mt-4">
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-semibold tracking-wider text-zinc-300">VISUAL SET REPLAY HUD</CardTitle>
-                  <CardDescription className="text-zinc-400">Scrub the timeline to analyze your skeleton coordinates and joint metrics frame-by-frame.</CardDescription>
+                <CardHeader className="pb-3 flex flex-row items-start justify-between space-y-0">
+                  <div className="mr-4">
+                    <CardTitle className="text-sm font-semibold tracking-wider text-zinc-300">VISUAL SET REPLAY HUD</CardTitle>
+                    <CardDescription className="text-zinc-400">Scrub the timeline to analyze your skeleton coordinates and joint metrics frame-by-frame.</CardDescription>
+                  </div>
+                  <div className="flex items-center gap-1 rounded-full border border-zinc-800 bg-zinc-950/80 p-0.5 backdrop-blur shrink-0 mt-0.5">
+                    <button
+                      onClick={() => setHudMode("2d")}
+                      className={cn(
+                        "rounded-full px-2.5 py-1 text-[10px] font-bold tracking-wider uppercase transition-all duration-300 cursor-pointer",
+                        hudMode === "2d"
+                          ? "bg-zinc-100 text-zinc-900 shadow-sm"
+                          : "text-zinc-400 hover:text-zinc-200"
+                      )}
+                    >
+                      2D HUD
+                    </button>
+                    <button
+                      onClick={() => setHudMode("3d")}
+                      className={cn(
+                        "rounded-full px-2.5 py-1 text-[10px] font-bold tracking-wider uppercase transition-all duration-300 cursor-pointer",
+                        hudMode === "3d"
+                          ? "bg-cyan-500 text-white shadow-[0_0_10px_rgba(6,182,212,0.4)]"
+                          : "text-zinc-400 hover:text-zinc-200"
+                      )}
+                    >
+                      3D HUD
+                    </button>
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="relative aspect-video w-full overflow-hidden rounded-[20px] border border-zinc-800 bg-black shadow-inner">
-                    <canvas ref={replayOverlayRef} className="absolute inset-0 h-full w-full" />
+                    <canvas ref={replayOverlayRef} className="absolute inset-0 h-full w-full z-20 pointer-events-none" />
+                    {hudMode === "3d" && (
+                      <canvas ref={replayThreeCanvasRef} className="absolute inset-0 h-full w-full z-10 pointer-events-none" />
+                    )}
                   </div>
                   <div className="space-y-2">
                     <div className="flex items-center justify-between text-xs text-zinc-300">
