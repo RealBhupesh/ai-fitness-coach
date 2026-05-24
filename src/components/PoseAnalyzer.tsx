@@ -287,11 +287,16 @@ function draw(
   exerciseId?: ExerciseId,
   analysis?: FrameAnalysis
 ) {
-  if (!canvas || !video) return;
+  if (!canvas) return;
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
-  canvas.width = video.videoWidth || 1280;
-  canvas.height = video.videoHeight || 720;
+  if (video) {
+    canvas.width = video.videoWidth || 1280;
+    canvas.height = video.videoHeight || 720;
+  } else {
+    canvas.width = canvas.width || 640;
+    canvas.height = canvas.height || 360;
+  }
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   if (!landmarks?.length) return;
 
@@ -608,6 +613,10 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   const caloriesRef = useRef(calories);
   const coachLevelRef = useRef<CoachLevel>(coachLevel);
   const curlBaselineRef = useRef<CurlBaseline | null>(curlBaseline);
+  const [streakCount, setStreakCount] = useState(0);
+  const [replayFrameIndex, setReplayFrameIndex] = useState(0);
+  const replayOverlayRef = useRef<HTMLCanvasElement | null>(null);
+  const landmarksHistoryRef = useRef<Array<{ landmarks: Landmark[], analysis: FrameAnalysis }>>([]);
 
   const pushTelemetry = (event: SessionTelemetryEvent) => {
     recordTelemetry(sessionBufferRef.current, event);
@@ -691,6 +700,9 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     calibrationHoldFramesRef.current = 0;
     setSeconds(0);
     setCalories(0);
+    setStreakCount(0);
+    setReplayFrameIndex(0);
+    landmarksHistoryRef.current = [];
   };
 
   const onPipPointerDown = (event: React.PointerEvent) => {
@@ -747,6 +759,33 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       },
       curlScorecard,
     });
+
+    // Streak Counter Logic
+    if (frame.overall >= 85) {
+      setStreakCount((prev) => {
+        const next = prev + 1;
+        if (next >= 3) {
+          voiceRef.current.speak(`Streak ${next}! Excellent consistency!`, "info", `streak_${next}`);
+          toast.success(`Form Streak: ${next} reps in a row!`, { icon: "🔥" });
+        }
+        return next;
+      });
+    } else if (frame.overall < 75) {
+      setStreakCount(0);
+    }
+
+    // Muscle Fatigue Compensation Analysis
+    if (repsRef.current >= 4) {
+      const recentReps = repDataRef.current.slice(-3);
+      const avgForm = average(recentReps.map((r) => r.formScore));
+      const firstRepForm = repDataRef.current[0]?.formScore ?? 85;
+
+      if (avgForm < firstRepForm - 10) {
+        const alertMsg = "Fatigue detected. Focus on your core stability and keep your movements controlled.";
+        voiceRef.current.speak(alertMsg, "warning", "fatigue_compensation");
+        toast.warning("Compensation Warning: Form is slipping due to fatigue!", { duration: 5000 });
+      }
+    }
     pushTelemetry({
       timestampMs: Math.max(0, now - startedAtRef.current),
       type: "rep_counted",
@@ -935,6 +974,10 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     };
 
     framesRef.current.push(resolved);
+    landmarksHistoryRef.current.push({
+      landmarks: trackingFrame.smoothedLandmarks,
+      analysis: resolved
+    });
     if (currentId === "bicep_curl") {
       curlFrameHistoryRef.current = [...curlFrameHistoryRef.current.slice(-180), { timestampMs: now, analysis: resolved }];
     }
@@ -1357,6 +1400,64 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     } catch {}
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+
+    let recognition: any = null;
+    if (cameraOn) {
+      try {
+        recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = false;
+        recognition.lang = "en-US";
+        
+        recognition.onresult = (event: any) => {
+          const last = event.results.length - 1;
+          const text = event.results[last][0].transcript.toLowerCase().trim();
+          
+          if (text.includes("start session") || text.includes("start workout") || text.includes("begin session")) {
+            toast.success("Voice command: Starting session");
+            startSession();
+          } else if (text.includes("stop session") || text.includes("stop workout") || text.includes("finish session")) {
+            toast.success("Voice command: Stopping session");
+            void stopSession();
+          } else if (text.includes("mute coach") || text.includes("disable voice")) {
+            toast.success("Voice command: Mute coach");
+            setVoiceEnabled(false);
+          } else if (text.includes("unmute coach") || text.includes("enable voice")) {
+            toast.success("Voice command: Unmute coach");
+            setVoiceEnabled(true);
+          }
+        };
+
+        recognition.onerror = () => {};
+        recognition.onend = () => {
+          if (cameraOn && runningRef.current) {
+            try { recognition.start(); } catch {}
+          }
+        };
+
+        recognition.start();
+      } catch {}
+    }
+
+    return () => {
+      if (recognition) {
+        try { recognition.stop(); } catch {}
+      }
+    };
+  }, [cameraOn]);
+
+  useEffect(() => {
+    if (running || !landmarksHistoryRef.current.length) return;
+    const point = landmarksHistoryRef.current[replayFrameIndex];
+    if (point && replayOverlayRef.current) {
+      draw(replayOverlayRef.current, null, point.landmarks, point.analysis.overall, false, exerciseIdRef.current, point.analysis);
+    }
+  }, [replayFrameIndex, running]);
+
   const qualityPercent = useMemo(() => Math.round(confidence.avgVisibility * 100), [confidence.avgVisibility]);
   const calibrationReady = cameraOn && confidence.ready && calibrationHoldProgress >= 18;
   const calibrationMessage = confidence.ready && calibrationHoldProgress < 18 ? "Hold steady so the coach can lock onto your setup." : confidence.message;
@@ -1399,7 +1500,12 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   const cameraViewport = (
     <div
       className={cn(
-        "relative overflow-hidden rounded-[28px] border border-zinc-800 bg-black shadow-[0_30px_100px_rgba(0,0,0,0.45)]",
+        "relative overflow-hidden rounded-[28px] border bg-black shadow-[0_30px_100px_rgba(0,0,0,0.45)] transition-all duration-500",
+        streakCount >= 5
+          ? "border-fuchsia-500 shadow-[0_0_35px_rgba(217,70,239,0.5)] scale-[1.01]"
+          : streakCount >= 3
+            ? "border-cyan-500 shadow-[0_0_25px_rgba(6,182,212,0.4)]"
+            : "border-zinc-800",
         cameraLayout === "portrait" ? "aspect-[3/4]" : "aspect-video",
       )}
     >
@@ -1704,6 +1810,95 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
               </CardContent>
             </Card>
 
+            {/* Muscle Engagement Heatmap HUD Card */}
+            {running && (
+              <Card className="border-zinc-800 bg-zinc-950/70 text-zinc-100">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-semibold tracking-wider text-zinc-300">MUSCLE ENGAGEMENT HUD</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between text-xs text-zinc-400">
+                    <span>Active Movers</span>
+                    <span>Intensity: {Math.min(100, repsRef.current * 10)}%</span>
+                  </div>
+                  <div className="flex items-center justify-center gap-6 rounded-2xl border border-zinc-900 bg-zinc-900/40 p-4">
+                    <svg viewBox="0 0 100 160" className="h-28 w-20 drop-shadow-[0_0_10px_rgba(0,0,0,0.55)]">
+                      <circle cx="50" cy="18" r="10" className="fill-zinc-800/60 stroke-zinc-700/50" />
+                      <rect
+                        x="38"
+                        y="38"
+                        width="24"
+                        height="42"
+                        rx="4"
+                        className={cn(
+                          "transition-all duration-500",
+                          exerciseId === "plank" || exerciseId === "pushup" || exerciseId === "squat" || exerciseId === "lunge"
+                            ? Math.min(100, repsRef.current * 10) >= 80
+                              ? "fill-rose-500/80 stroke-rose-400 animate-pulse"
+                              : Math.min(100, repsRef.current * 10) >= 50
+                                ? "fill-orange-500/70 stroke-orange-400"
+                                : Math.min(100, repsRef.current * 10) >= 20
+                                  ? "fill-amber-500/60 stroke-amber-400"
+                                  : "fill-yellow-500/45 stroke-yellow-400/60"
+                            : "fill-zinc-800/40 stroke-zinc-700/50"
+                        )}
+                      />
+                      <path
+                        d="M34,42 L24,65 L18,85 M66,42 L76,65 L82,85"
+                        fill="none"
+                        strokeWidth="6"
+                        strokeLinecap="round"
+                        className={cn(
+                          "transition-all duration-500",
+                          exerciseId === "bicep_curl" || exerciseId === "pushup" || exerciseId === "plank"
+                            ? Math.min(100, repsRef.current * 10) >= 80
+                              ? "stroke-rose-500/80 animate-pulse"
+                              : Math.min(100, repsRef.current * 10) >= 50
+                                ? "stroke-orange-500/70"
+                                : Math.min(100, repsRef.current * 10) >= 20
+                                  ? "stroke-amber-500/60"
+                                  : "stroke-yellow-500/45"
+                            : "stroke-zinc-800/40"
+                        )}
+                      />
+                      <path
+                        d="M42,80 L38,115 L36,150 M58,80 L62,115 L64,150"
+                        fill="none"
+                        strokeWidth="7"
+                        strokeLinecap="round"
+                        className={cn(
+                          "transition-all duration-500",
+                          exerciseId === "squat" || exerciseId === "lunge" || exerciseId === "jumping_jack" || exerciseId === "warrior"
+                            ? Math.min(100, repsRef.current * 10) >= 80
+                              ? "stroke-rose-500/80 animate-pulse"
+                              : Math.min(100, repsRef.current * 10) >= 50
+                                ? "stroke-orange-500/70"
+                                : Math.min(100, repsRef.current * 10) >= 20
+                                  ? "stroke-amber-500/60"
+                                  : "stroke-yellow-500/45"
+                            : "stroke-zinc-800/40"
+                        )}
+                      />
+                    </svg>
+                    <div className="flex flex-col gap-1.5 text-[11px] text-zinc-300">
+                      <div className="flex items-center gap-2">
+                        <span className={cn("h-2.5 w-2.5 rounded-full", exerciseId === "bicep_curl" || exerciseId === "pushup" ? "bg-rose-400 animate-pulse" : "bg-zinc-700")} />
+                        <span>Arms / Chest</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={cn("h-2.5 w-2.5 rounded-full", exerciseId === "plank" || exerciseId === "pushup" ? "bg-amber-400" : "bg-zinc-700")} />
+                        <span>Core Stabilizers</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={cn("h-2.5 w-2.5 rounded-full", exerciseId === "squat" || exerciseId === "lunge" ? "bg-cyan-400" : "bg-zinc-700")} />
+                        <span>Legs (Quads/Glutes)</span>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             <Card className="border-zinc-800 bg-zinc-950/70 text-zinc-100">
               <CardHeader>
                 <CardTitle>Score breakdown</CardTitle>
@@ -1975,6 +2170,35 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                 </CardContent>
               </Card>
             ) : null}
+
+            {/* Visual Set Replay HUD */}
+            {!running && landmarksHistoryRef.current.length > 0 && (
+              <Card className="border-zinc-800 bg-zinc-950/70 text-zinc-100 mt-4">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-semibold tracking-wider text-zinc-300">VISUAL SET REPLAY HUD</CardTitle>
+                  <CardDescription className="text-zinc-400">Scrub the timeline to analyze your skeleton coordinates and joint metrics frame-by-frame.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="relative aspect-video w-full overflow-hidden rounded-[20px] border border-zinc-800 bg-black shadow-inner">
+                    <canvas ref={replayOverlayRef} className="absolute inset-0 h-full w-full" />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-xs text-zinc-300">
+                      <span>Frame {replayFrameIndex + 1} of {landmarksHistoryRef.current.length}</span>
+                      <span>Rep Phase: <span className="font-semibold text-cyan-300 uppercase">{landmarksHistoryRef.current[replayFrameIndex]?.analysis.phase ?? "N/A"}</span></span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max={landmarksHistoryRef.current.length - 1}
+                      value={replayFrameIndex}
+                      onChange={(e) => setReplayFrameIndex(Number(e.target.value))}
+                      className="w-full accent-cyan-500 bg-zinc-800 h-2 rounded-lg cursor-pointer transition-all"
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </div>
         </div>
       </div>
