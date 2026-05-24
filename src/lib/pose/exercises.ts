@@ -146,7 +146,7 @@ export const EXERCISE_CONTRACTS: Record<ExerciseId, ExerciseContract> = {
     label: "Squat",
     viewPolicy: EXERCISE_VIEW_POLICIES.squat,
     readinessRules: ["Full body visible", "Front or 30-45 degree view", "Both feet visible"],
-    feedbackKeys: ["depth", "torso_stack", "hip_centering", "symmetry", "shoulder_stability"],
+    feedbackKeys: ["depth", "knee_tracking", "torso_stack", "hip_centering", "symmetry", "shoulder_stability"],
   },
   pushup: {
     id: "pushup",
@@ -602,7 +602,7 @@ function analyzeBicepCurl(input: Landmark[] | TrackingFrame, phaseOverride?: str
     ),
     metric(
       "Elbow Path",
-      scoreFromTarget(elbowForwardDrift, 0, 28),
+      scoreFromRange(elbowForwardDrift, 0, 28, 12),
       elbowForwardDrift > 30
         ? `Keep your ${trackedSide === "both" ? "elbows" : `${primary.side} elbow`} pinned to your ribs; it is drifting forward.`
         : `Good ${trackedSide === "both" ? "elbow path" : `${primary.side} elbow path`}; the upper arm is staying quiet.`,
@@ -615,7 +615,7 @@ function analyzeBicepCurl(input: Landmark[] | TrackingFrame, phaseOverride?: str
     ),
     metric(
       "Shoulder Stability",
-      scoreFromTarget(shoulderHike, 0, 7),
+      scoreFromRange(shoulderHike, 0, 7, 8),
       shoulderHike > 8
         ? `Stop shrugging your ${primary.side} shoulder to finish the curl.`
         : "Shoulder is staying quiet and out of the rep.",
@@ -628,7 +628,7 @@ function analyzeBicepCurl(input: Landmark[] | TrackingFrame, phaseOverride?: str
     ),
     metric(
       "Torso Stability",
-      scoreFromTarget(torsoSwing, 0, 11),
+      scoreFromRange(torsoSwing, 0, 11, 8),
       torsoSwing > 12
         ? "Brace your abs and stop swinging your torso to start the curl."
         : "Torso stays quiet; the curl is coming from the arm.",
@@ -644,7 +644,7 @@ function analyzeBicepCurl(input: Landmark[] | TrackingFrame, phaseOverride?: str
     ),
     metric(
       "Wrist Stack",
-      scoreFromTarget(wristFold, 0, 26),
+      scoreFromRange(wristFold, 0, 26, 10),
       wristFold > 28
         ? `Straighten your ${primary.side} wrist; keep the dumbbell stacked over the forearm.`
         : "Wrist stays stacked over the forearm.",
@@ -657,7 +657,7 @@ function analyzeBicepCurl(input: Landmark[] | TrackingFrame, phaseOverride?: str
     ),
     metric(
       "Symmetry",
-      scoreFromTarget(symmetryGap, 0, 12),
+      scoreFromRange(symmetryGap, 0, 12, 8),
       symmetryGap > 13
         ? "One arm is moving ahead of the other. Match both elbows and wrists."
         : "Both arms are moving together.",
@@ -731,6 +731,9 @@ function analyzeSquat(input: Landmark[] | TrackingFrame, phaseOverride?: string)
   const torsoAngle = trunkStackAngle(landmarks);
   const shoulderSpan = Math.max(distance(leftShoulder, rightShoulder), 0.08);
   const shoulderTiltValue = shoulderTilt(landmarks);
+  const ankleWidth = distance(leftAnkle, rightAnkle);
+  const kneeWidth = distance(leftKnee, rightKnee);
+  const kneeCollapse = (Math.max(0, ankleWidth - kneeWidth) / shoulderSpan) * 100;
   const hipShift = (Math.abs((hipCenter?.x ?? 0) - (ankleCenter?.x ?? kneeCenter?.x ?? 0)) / shoulderSpan) * 100;
   const depthActive = phase !== "top" || avgKnee < 150;
   const squatReliable = resolveReliability(input, "fullBody", [11, 12, 23, 24, 25, 26, 27, 28], {
@@ -752,6 +755,19 @@ function analyzeSquat(input: Landmark[] | TrackingFrame, phaseOverride?: string)
       {
         reliable: squatReliable && depthActive,
         unreliableDetail: "Depth is not reliable to judge until both hips, knees, and ankles stay visible through the descent.",
+      },
+    ),
+    metric(
+      "Knee Tracking",
+      scoreFromTarget(kneeCollapse, 0, 10),
+      kneeCollapse > 12
+        ? "Drive both knees over the middle toes. They are collapsing inward at the bottom."
+        : "Knees are tracking cleanly over the feet.",
+      Number(kneeCollapse.toFixed(1)),
+      "0-10 inward collapse",
+      {
+        reliable: squatReliable && depthActive,
+        unreliableDetail: "Knee tracking is not reliable to judge until knees and ankles stay visible through the bottom.",
       },
     ),
     metric(
@@ -819,19 +835,23 @@ function analyzeSquat(input: Landmark[] | TrackingFrame, phaseOverride?: string)
 
   const positives = [
     metrics[0].reliable !== false && metrics[0].score >= 86 ? "Depth is landing in a strong, controlled bottom position." : "",
-    metrics[1].reliable !== false && metrics[1].score >= 85 ? "Your chest is staying stacked over the mid-foot." : "",
-    metrics[2].reliable !== false && metrics[2].score >= 85 ? "You are staying centered instead of drifting off one side." : "",
-    metrics[3].reliable !== false && metrics[3].score >= 85 ? "Both legs are sharing the squat evenly." : "",
+    metrics[1].reliable !== false && metrics[1].score >= 85 ? "Your knees are tracking cleanly over your feet." : "",
+    metrics[2].reliable !== false && metrics[2].score >= 85 ? "Your chest is staying stacked over the mid-foot." : "",
+    metrics[3].reliable !== false && metrics[3].score >= 85 ? "You are staying centered instead of drifting off one side." : "",
+    metrics[4].reliable !== false && metrics[4].score >= 85 ? "Both legs are sharing the squat evenly." : "",
   ].filter(Boolean);
 
   const injuryRisks = [
-    metrics[1].reliable !== false && torsoAngle < 48
+    metrics[2].reliable !== false && torsoAngle < 48
       ? "Your torso is collapsing too far forward. Reset before the next rep so the low back does not take the load."
       : "",
     metrics[0].reliable !== false && avgKnee < 68
       ? "You are dropping deeper than you can control. Stay in the deepest position you can own safely."
       : "",
-    metrics[2].reliable !== false && hipShift > 18
+    metrics[1].reliable !== false && kneeCollapse > 18
+      ? "Your knees are collapsing inward. Reset your stance before loading the next rep."
+      : "",
+    metrics[3].reliable !== false && hipShift > 18
       ? "You are shifting hard onto one side at the bottom. Re-center before loading the next rep."
       : "",
   ].filter(Boolean);

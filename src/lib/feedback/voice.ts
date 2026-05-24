@@ -1,4 +1,5 @@
 export type VoiceFeedbackPriority = "critical" | "warning" | "info";
+export type VoiceFeedbackStyle = "calm" | "balanced" | "strict";
 
 type VoiceQueueItem = {
   message: string;
@@ -20,6 +21,7 @@ const COOLDOWN_MS: Record<VoiceFeedbackPriority, number> = {
 
 export function createVoiceFeedbackController() {
   let enabled = true;
+  let style: VoiceFeedbackStyle = "balanced";
   let speaking = false;
   let lastSpokenAt = 0;
   let lastMessage = "";
@@ -38,6 +40,14 @@ export function createVoiceFeedbackController() {
     }
 
     const utterance = new SpeechSynthesisUtterance(next.message);
+    utterance.rate = style === "strict" ? 0.98 : style === "calm" ? 0.86 : 0.92;
+    utterance.pitch = style === "strict" ? 0.96 : style === "calm" ? 1.04 : 1;
+    utterance.volume = style === "calm" ? 0.82 : 0.9;
+    const voices = window.speechSynthesis.getVoices?.() ?? [];
+    const preferredVoice = voices.find((voice) => /samantha|karen|moira|zira|female|google uk english female/i.test(voice.name)) ?? voices.find((voice) => /^en[-_]/i.test(voice.lang));
+    if (preferredVoice) {
+      utterance.voice = preferredVoice;
+    }
     speaking = true;
     utterance.onend = () => {
       speaking = false;
@@ -67,6 +77,9 @@ export function createVoiceFeedbackController() {
         speaking = false;
         window.speechSynthesis.cancel();
       }
+    },
+    setStyle(next: VoiceFeedbackStyle) {
+      style = next;
     },
     speak(message: string, priority: VoiceFeedbackPriority, signature?: string) {
       if (!enabled || !message) {

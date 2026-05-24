@@ -38,13 +38,13 @@ function buildCurlLandmarks(angleDeg: number, options: { wristVisibility?: numbe
   return landmarks;
 }
 
-function setSquatLeg(landmarks: Landmark[], side: "left" | "right", kneeAngle: number) {
+function setSquatLeg(landmarks: Landmark[], side: "left" | "right", kneeAngle: number, kneeOffset = 0, hipOffset = 0) {
   const hipIndex = side === "left" ? 23 : 24;
   const kneeIndex = side === "left" ? 25 : 26;
   const ankleIndex = side === "left" ? 27 : 28;
   const centerX = side === "left" ? 0.43 : 0.57;
-  const hip = { x: centerX, y: 0.43, visibility: 0.99 };
-  const knee = { x: centerX, y: 0.64, visibility: 0.99 };
+  const hip = { x: centerX + hipOffset, y: 0.43, visibility: 0.99 };
+  const knee = { x: centerX + kneeOffset, y: 0.64, visibility: 0.99 };
   const radians = (kneeAngle * Math.PI) / 180;
   const radius = 0.18;
 
@@ -57,12 +57,12 @@ function setSquatLeg(landmarks: Landmark[], side: "left" | "right", kneeAngle: n
   };
 }
 
-function buildSquatLandmarks(kneeAngle: number) {
+function buildSquatLandmarks(kneeAngle: number, options: { leftKneeOffset?: number; rightKneeOffset?: number; hipOffset?: number } = {}) {
   const landmarks = createLandmarks();
   landmarks[11] = { x: 0.4, y: 0.22, visibility: 0.99 };
   landmarks[12] = { x: 0.6, y: 0.22, visibility: 0.99 };
-  setSquatLeg(landmarks, "left", kneeAngle);
-  setSquatLeg(landmarks, "right", kneeAngle);
+  setSquatLeg(landmarks, "left", kneeAngle, options.leftKneeOffset, options.hipOffset);
+  setSquatLeg(landmarks, "right", kneeAngle, options.rightKneeOffset, options.hipOffset);
   return landmarks;
 }
 
@@ -123,5 +123,23 @@ describe("pose exercise tracking", () => {
 
     expect(wristMetric?.reliable).toBe(false);
     expect(analysis.corrections.some((detail) => /wrist/i.test(detail))).toBe(false);
+  });
+
+  it("surfaces squat knee collapse as a specific reliable correction", () => {
+    const landmarks = buildSquatLandmarks(96, { leftKneeOffset: 0.08, rightKneeOffset: -0.08 });
+    const analysis = analyzeExercise("squat", landmarks, 0, undefined, "bottom");
+    const kneeMetric = analysis.metrics.find((metric) => metric.name === "Knee Tracking");
+
+    expect(kneeMetric?.score).toBeLessThan(78);
+    expect(analysis.corrections[0]).toMatch(/knees over the middle toes|collapsing inward/i);
+  });
+
+  it("surfaces hard hip shift separately from knee tracking", () => {
+    const landmarks = buildSquatLandmarks(98, { hipOffset: 0.08 });
+    const analysis = analyzeExercise("squat", landmarks, 0, undefined, "bottom");
+    const hipMetric = analysis.metrics.find((metric) => metric.name === "Hip Centering");
+
+    expect(hipMetric?.score).toBeLessThan(78);
+    expect(analysis.corrections.some((detail) => /hips centered|shifting/i.test(detail))).toBe(true);
   });
 });

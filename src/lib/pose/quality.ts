@@ -118,23 +118,32 @@ export function evaluateFrameQuality(input: QualityInput): ConfidenceStatus {
     reasons.push(message);
   } else if (!fullBodyVisible) {
     frameQuality = avgVisibility < 0.3 ? "camera_lost" : avgVisibility < 0.5 ? "partial_body" : "occluded";
-    message = frameQuality === "partial_body" ? "Show your full body in frame." : "Critical joints are occluded. Reset your position.";
+    message =
+      frameQuality === "partial_body"
+        ? policy.requireFullBody
+          ? "Show your full body from shoulders to feet, then hold still for calibration."
+          : "Bring your shoulders, elbows, wrists, and hips clearly into frame."
+        : "Critical joints are occluded. Move hands, clothes, or equipment away from the tracked joints.";
     reasons.push(message);
   } else if (!centered || tooClose || tooFar) {
     frameQuality = "partial_body";
-    message = !centered ? "Center yourself in the frame." : tooClose ? "Step back slightly." : "Move a bit closer.";
+    message = !centered
+      ? "Center yourself in the camera frame so both sides are visible."
+      : tooClose
+        ? "Step back slightly so the coach can see the full movement path."
+        : "Move a bit closer so joints are large enough to track accurately.";
     reasons.push(message);
   } else if (!allowedViews.includes(view)) {
     frameQuality = "wrong_angle";
-    message = policy.prompt;
+    message = `${policy.prompt} Current view looks ${view}.`;
     reasons.push(message);
   } else if (input.brightness < 45) {
     frameQuality = "low_light";
-    message = "Improve the lighting so joints stay visible.";
+    message = "Improve lighting on the front of your body so joints stay visible.";
     reasons.push(message);
   } else if (input.fps < 15) {
     frameQuality = "low_fps";
-    message = "Tracking is running slow. Reducing quality may help.";
+    message = "Tracking is running slow. Close other apps or switch to a lower camera quality.";
     reasons.push(message);
   } else if (input.motion > 9.5 && avgVisibility < 0.72) {
     frameQuality = "motion_blur";

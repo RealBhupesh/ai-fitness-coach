@@ -1,4 +1,5 @@
-import { advanceFeedbackState, buildIssueSignature, createFeedbackState, type FeedbackCue } from "@/lib/feedback/state";
+import { selectFeedbackCue } from "@/lib/feedback/cues";
+import { advanceFeedbackState, createFeedbackState, type FeedbackCue } from "@/lib/feedback/state";
 import { evaluateSafety } from "@/lib/pose/safety";
 import { buildTrackingFrame, evaluateConfidence } from "@/lib/pose/confidence";
 import { analyzeExercise, advancePhaseTracker, createPhaseTrackerState } from "@/lib/pose/exercises";
@@ -32,33 +33,6 @@ export type ReplayResult = {
   finalAnalysis: FrameAnalysis | null;
   sessionAnalysis: SessionAnalysisBuffer;
 };
-
-function selectReplayCue(exerciseId: ExerciseId, frame: FrameAnalysis, safety: ReturnType<typeof evaluateSafety>): FeedbackCue {
-  const build = (message: string, severity: FeedbackCue["severity"], source: FeedbackCue["source"], side?: string, secondaryNote?: string): FeedbackCue => ({
-    message,
-    severity,
-    source,
-    secondaryNote,
-    signature: buildIssueSignature({ severity, message, side, channel: exerciseId }),
-  });
-
-  if (safety.blocked || safety.severity === "critical") {
-    return build(safety.messages[0], "critical", "rule_engine", "body", frame.secondaryNote);
-  }
-  if (frame.injuryRisks.length) {
-    return build(frame.injuryRisks[0], "warning", "rule_engine", frame.trackedSide, frame.secondaryNote);
-  }
-  if (safety.severity === "warning" && safety.messages.length) {
-    return build(safety.messages[0], "warning", "rule_engine", frame.trackedSide, frame.secondaryNote);
-  }
-  if (frame.corrections.length) {
-    return build(frame.corrections[0], "warning", "rule_engine", frame.trackedSide, frame.secondaryNote);
-  }
-  if (frame.positives.length) {
-    return build(frame.positives[0], "info", "system", frame.trackedSide, frame.secondaryNote);
-  }
-  return build(frame.primaryFocus || frame.targetCue || "Strong rep. Keep the rhythm.", "info", "system", frame.trackedSide, frame.secondaryNote);
-}
 
 export function runReplayFixture(fixture: ReplayFixture): ReplayResult {
   let previousSmoothed: Landmark[] | null = null;
@@ -124,7 +98,7 @@ export function runReplayFixture(fixture: ReplayFixture): ReplayResult {
       });
     }
 
-    const cue = selectReplayCue(fixture.exerciseId, finalAnalysis, safety);
+    const cue = selectFeedbackCue(fixture.exerciseId, finalAnalysis, safety, trackingFrame.trackingConfidence);
     const feedbackDecision = advanceFeedbackState(feedbackState, shouldPause ? null : cue, { now: frame.timestampMs, confidence: trackingFrame.trackingConfidence });
     feedbackState = feedbackDecision.nextState;
 

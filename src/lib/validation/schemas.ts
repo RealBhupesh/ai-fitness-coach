@@ -68,6 +68,7 @@ export const chatInputSchema = z.object({
 
 export const coachFeedbackInputSchema = z.object({
   exerciseType: z.string().min(1).max(80),
+  coachingLevel: z.enum(["easy", "normal", "hard"]).default("normal"),
   repsSoFar: z.number().int().min(0),
   phase: z.string().max(40).optional(),
   confidence: z.number().min(0).max(1).optional(),
@@ -97,12 +98,77 @@ export const coachFeedbackInputSchema = z.object({
     )
     .max(20)
     .default([]),
+  cueEvidence: z
+    .object({
+      metricName: z.string().max(80).optional(),
+      side: z.enum(["left", "right", "both", "body"]).optional(),
+      phase: z.string().max(40).optional(),
+      score: z.number().min(0).max(100).optional(),
+      value: z.number().optional(),
+      target: z.string().max(80).optional(),
+      confidence: z.number().min(0).max(1).optional(),
+    })
+    .optional(),
+  recentCueHistory: z
+    .array(
+      z.object({
+        message: z.string().min(1).max(500),
+        severity: z.enum(["critical", "warning", "info"]),
+        source: z.enum(["rule_engine", "llm_coach", "system"]),
+        timestamp: z.number().min(0),
+      }),
+    )
+    .max(10)
+    .default([]),
+});
+
+const curlMetricGradeSchema = z.object({
+  key: z.string().min(1).max(80),
+  label: z.string().min(1).max(120),
+  score: z.number().min(0).max(100),
+  value: z.number().optional(),
+  target: z.string().max(120).optional(),
+  status: z.enum(["pass", "warning", "fail", "unreliable"]),
+  reliable: z.boolean(),
+  detail: z.string().max(300),
+});
+
+const curlRepScorecardSchema = z.object({
+  repNumber: z.number().int().min(1),
+  overall: z.number().min(0).max(100),
+  status: z.enum(["pass", "warning", "fail", "unreliable"]),
+  bestPhase: z.string().max(40),
+  worstMetric: z.string().max(80).optional(),
+  failedMetrics: z.array(z.string().min(1).max(120)).max(12),
+  metrics: z.record(z.string(), curlMetricGradeSchema),
+  reliability: z.number().min(0).max(100),
+  coachingLevel: z.enum(["easy", "normal", "hard"]),
+});
+
+const curlEvidenceSchema = z.object({
+  totalReps: z.number().int().min(0).max(5000),
+  bestRep: z.number().int().min(1).optional(),
+  worstRep: z.number().int().min(1).optional(),
+  averageScore: z.number().min(0).max(100),
+  improvementTrend: z.number().min(-100).max(100),
+  recurringFailedMetrics: z.array(z.string().min(1).max(120)).max(12),
+  reliabilityAverage: z.number().min(0).max(100),
+  repScorecards: z.array(curlRepScorecardSchema).max(500),
+});
+
+const curlCoachMemorySchema = z.object({
+  primaryMetric: z.string().min(1).max(120).optional(),
+  lastAverageScore: z.number().min(0).max(100),
+  improvementTrend: z.number().min(-100).max(100),
+  reliabilityAverage: z.number().min(0).max(100),
+  updatedAt: z.string().max(80),
 });
 
 export const summarizeInputSchema = z.object({
   sessionId: z.string().min(1).optional(),
   sessionSummary: z.string().min(1).max(5000).optional(),
   exerciseType: z.string().max(80).optional(),
+  coachingLevel: z.enum(["easy", "normal", "hard"]).default("normal"),
   durationMinutes: z.number().int().min(0).max(720).optional(),
   totalReps: z.number().int().min(0).max(5000).optional(),
   scoringBreakdown: z
@@ -119,6 +185,8 @@ export const summarizeInputSchema = z.object({
     .optional(),
   topIssues: z.array(z.string().min(1).max(220)).max(12).optional(),
   topStrengths: z.array(z.string().min(1).max(220)).max(12).optional(),
+  curlEvidence: curlEvidenceSchema.optional(),
+  curlCoachMemory: curlCoachMemorySchema.optional(),
 });
 
 export const workoutPlanCreateSchema = z.object({
@@ -194,6 +262,7 @@ export const workoutSessionInputSchema = z.object({
             endMs: z.number().int().min(0).optional(),
           })
           .optional(),
+        curlScorecard: curlRepScorecardSchema.nullable().optional(),
       }),
     )
     .default([]),

@@ -10,6 +10,15 @@ function warningCue(message: string): FeedbackCue {
   };
 }
 
+function criticalCue(message: string): FeedbackCue {
+  return {
+    message,
+    severity: "critical",
+    source: "rule_engine",
+    signature: buildIssueSignature({ severity: "critical", message, channel: "squat", side: "body" }),
+  };
+}
+
 describe("feedback state engine", () => {
   it("emits a warning only after the issue is stable, then suppresses repeats inside cooldown", () => {
     let state = createFeedbackState();
@@ -41,6 +50,13 @@ describe("feedback state engine", () => {
       state = decision.nextState;
       expect(decision.shouldEmit).toBe(false);
     }
+  });
+
+  it("emits a critical cue immediately the first time it appears", () => {
+    const decision = advanceFeedbackState(createFeedbackState(), criticalCue("Stop and reset your stance."), { now: 0, confidence: 0.9 });
+
+    expect(decision.shouldEmit).toBe(true);
+    expect(decision.reason).toBe("safety");
   });
 
   it("emits a new stable cue when the active issue changes", () => {

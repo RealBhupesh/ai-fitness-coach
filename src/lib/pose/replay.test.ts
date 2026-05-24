@@ -36,6 +36,35 @@ function buildSquatLandmarks(kneeAngle: number, visibility = 0.99) {
   return landmarks;
 }
 
+function setCurlArm(landmarks: Landmark[], side: "left" | "right", angleDeg: number, elbowOffset = 0, visibility = 0.99) {
+  const shoulderIndex = side === "left" ? 11 : 12;
+  const elbowIndex = side === "left" ? 13 : 14;
+  const wristIndex = side === "left" ? 15 : 16;
+  const hipIndex = side === "left" ? 23 : 24;
+  const shoulderX = side === "left" ? 0.36 : 0.64;
+  const elbowX = shoulderX + elbowOffset;
+  const shoulderY = 0.34;
+  const elbowY = 0.5;
+  const radius = 0.14;
+  const radians = (angleDeg * Math.PI) / 180;
+
+  landmarks[shoulderIndex] = { x: shoulderX, y: shoulderY, z: side === "left" ? -0.02 : 0.02, visibility };
+  landmarks[elbowIndex] = { x: elbowX, y: elbowY, visibility };
+  landmarks[wristIndex] = {
+    x: elbowX + radius * Math.sin(radians) * (side === "left" ? 1 : -1),
+    y: elbowY - radius * Math.cos(radians),
+    visibility,
+  };
+  landmarks[hipIndex] = { x: shoulderX, y: 0.72, z: side === "left" ? -0.01 : 0.01, visibility };
+}
+
+function buildCurlLandmarks(angleDeg: number, elbowOffset = 0) {
+  const landmarks = createLandmarks();
+  setCurlArm(landmarks, "left", angleDeg, elbowOffset);
+  setCurlArm(landmarks, "right", angleDeg, -elbowOffset);
+  return landmarks;
+}
+
 describe("replay harness", () => {
   it("does not count reps while frame quality is paused and resumes once tracking recovers", () => {
     const frames = [
@@ -55,5 +84,21 @@ describe("replay harness", () => {
     expect(result.pauseFrames).toBeGreaterThan(0);
     expect(result.repCount).toBe(1);
     expect(result.sessionAnalysis.frameQualityStats.partial_body + result.sessionAnalysis.frameQualityStats.camera_lost + result.sessionAnalysis.frameQualityStats.occluded).toBeGreaterThan(0);
+  });
+
+  it("emits stable bicep curl cues from deterministic metric evidence", () => {
+    const frames = Array.from({ length: 10 }, (_, index) => ({
+      timestampMs: index * 140,
+      landmarks: buildCurlLandmarks(166, 0.08),
+      brightness: 82,
+    }));
+
+    const result = runReplayFixture({
+      exerciseId: "bicep_curl",
+      frames,
+    });
+
+    expect(result.emittedCues.length).toBeGreaterThan(0);
+    expect(result.emittedCues[0].message).toMatch(/elbow/i);
   });
 });

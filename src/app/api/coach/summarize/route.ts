@@ -68,6 +68,9 @@ Top strengths: ${(parsed.data.topStrengths ?? []).join("; ") || "none"}`;
       profile,
       sessionSummary: workoutText,
       exerciseType: parsed.data.exerciseType,
+      coachingLevel: parsed.data.coachingLevel,
+      curlEvidence: parsed.data.curlEvidence,
+      curlCoachMemory: parsed.data.curlCoachMemory,
     });
 
     if (workoutId && !isDemoUser(session.user.id)) {

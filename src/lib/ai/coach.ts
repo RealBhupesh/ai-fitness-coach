@@ -407,9 +407,52 @@ export async function generateSessionSummary(input: {
   profile: AppUserProfile | null;
   sessionSummary: string;
   exerciseType?: string;
+  coachingLevel?: "easy" | "normal" | "hard";
+  curlEvidence?: {
+    totalReps: number;
+    bestRep?: number;
+    worstRep?: number;
+    averageScore: number;
+    improvementTrend: number;
+    recurringFailedMetrics: string[];
+    reliabilityAverage: number;
+    repScorecards: Array<{
+      repNumber: number;
+      overall: number;
+      status: string;
+      worstMetric?: string;
+      failedMetrics: string[];
+      reliability: number;
+    }>;
+  };
+  curlCoachMemory?: {
+    primaryMetric?: string;
+    lastAverageScore: number;
+    improvementTrend: number;
+    reliabilityAverage: number;
+    updatedAt: string;
+  };
 }) {
   const clientInfo = getClient();
   const isDance = input.exerciseType === "dance_basic" || /dance/i.test(input.sessionSummary);
+  const curlEvidenceText = input.curlEvidence
+    ? `Curl evidence
+Total reps: ${input.curlEvidence.totalReps}
+Average curl score: ${input.curlEvidence.averageScore}
+Best rep: ${input.curlEvidence.bestRep ?? "none"}
+Worst rep: ${input.curlEvidence.worstRep ?? "none"}
+Improvement trend: ${input.curlEvidence.improvementTrend}
+Recurring failed metrics: ${input.curlEvidence.recurringFailedMetrics.join(", ") || "none"}
+Reliability average: ${input.curlEvidence.reliabilityAverage}
+Rep scorecards: ${JSON.stringify(input.curlEvidence.repScorecards.slice(0, 20))}`
+    : "Curl evidence: none";
+  const curlMemoryText = input.curlCoachMemory
+    ? `Curl coach memory
+Previous focus: ${input.curlCoachMemory.primaryMetric ?? "none"}
+Previous average: ${input.curlCoachMemory.lastAverageScore}
+Previous trend: ${input.curlCoachMemory.improvementTrend}
+Previous reliability: ${input.curlCoachMemory.reliabilityAverage}`
+    : "Curl coach memory: none";
   const prompt = isDance
     ? `You are a high-precision dance coach. Analyze this session and produce:
 1) conciseSummary (1-2 sentences)
@@ -463,6 +506,13 @@ Focus on exact issues like frame width, wrist height mismatch, shoulder or hip t
 Profile
 ${profileContext(input.profile)}
 
+Coach level
+${input.coachingLevel ?? "normal"}
+
+${curlEvidenceText}
+
+${curlMemoryText}
+
 Session data
 ${input.sessionSummary}`
     : `You are a high-precision fitness coach. Analyze this workout and produce:
@@ -512,8 +562,17 @@ Return strict JSON with keys:
   ]
 }
 
+If curl evidence is present, base the summary on the rep scorecards. Mention best rep, worst rep, recurring failed metrics, and whether the reps improved or worsened. Do not invent metrics that are not in the evidence.
+
 Profile
 ${profileContext(input.profile)}
+
+Coach level
+${input.coachingLevel ?? "normal"}
+
+${curlEvidenceText}
+
+${curlMemoryText}
 
 Workout data
 ${input.sessionSummary}`;
@@ -560,8 +619,20 @@ ${input.sessionSummary}`;
     }
 
     return {
-      summary: "Solid session completed. Keep building consistency and focus on clean movement quality.",
-      keyInsights: ["You completed the session and built training consistency.", "Your next gains come from cleaner form under fatigue."],
+      summary: input.curlEvidence
+        ? `Curl session completed with ${input.curlEvidence.totalReps} reps and an average curl score of ${input.curlEvidence.averageScore}. Best rep: ${
+            input.curlEvidence.bestRep ?? "n/a"
+          }; worst rep: ${input.curlEvidence.worstRep ?? "n/a"}.`
+        : "Solid session completed. Keep building consistency and focus on clean movement quality.",
+      keyInsights: input.curlEvidence
+        ? [
+            input.curlEvidence.improvementTrend >= 0 ? "Curl quality improved or held steady across the set." : "Curl quality dropped across the set, likely from fatigue or rushing.",
+            input.curlEvidence.recurringFailedMetrics.length
+              ? `Most repeated issue: ${input.curlEvidence.recurringFailedMetrics[0]}.`
+              : "No repeated failed curl metric dominated the set.",
+            `Average tracking reliability was ${input.curlEvidence.reliabilityAverage}%.`,
+          ]
+        : ["You completed the session and built training consistency.", "Your next gains come from cleaner form under fatigue."],
       nextSessionFocus: [
         "Perform 2 slow warm-up sets before working reps.",
         "Use a 2-second lowering phase on every rep.",
@@ -715,6 +786,7 @@ ${input.sessionSummary}`;
 export async function generateCoachFeedback(input: {
   profile: AppUserProfile | null;
   exerciseType: string;
+  coachingLevel?: "easy" | "normal" | "hard";
   repsSoFar: number;
   phase?: string;
   confidence?: number;
@@ -723,6 +795,16 @@ export async function generateCoachFeedback(input: {
   currentIssues: string[];
   currentMetrics: Array<{ name: string; score: number; detail: string; value?: number; target?: string }>;
   recentScores: Array<{ form: number; rom: number; tempo: number; safety: number }>;
+  cueEvidence?: {
+    metricName?: string;
+    side?: "left" | "right" | "both" | "body";
+    phase?: string;
+    score?: number;
+    value?: number;
+    target?: string;
+    confidence?: number;
+  };
+  recentCueHistory?: Array<{ message: string; severity: "critical" | "warning" | "info"; source: "rule_engine" | "llm_coach" | "system"; timestamp: number }>;
 }) {
   const clientInfo = getClient();
   const scoreSummary = input.recentScores
@@ -731,8 +813,30 @@ export async function generateCoachFeedback(input: {
   const metricSummary = input.currentMetrics
     .map((metric) => `${metric.name}: ${metric.score}/100 (${metric.detail}${metric.target ? `, target ${metric.target}` : ""}${typeof metric.value === "number" ? `, value ${metric.value}` : ""})`)
     .join("\n");
+  const evidenceSummary = input.cueEvidence
+    ? [
+        input.cueEvidence.metricName ? `Metric: ${input.cueEvidence.metricName}` : "",
+        input.cueEvidence.side ? `Side: ${input.cueEvidence.side}` : "",
+        input.cueEvidence.phase ? `Phase: ${input.cueEvidence.phase}` : "",
+        typeof input.cueEvidence.score === "number" ? `Score: ${input.cueEvidence.score}/100` : "",
+        typeof input.cueEvidence.value === "number" ? `Value: ${input.cueEvidence.value}` : "",
+        input.cueEvidence.target ? `Target: ${input.cueEvidence.target}` : "",
+        typeof input.cueEvidence.confidence === "number" ? `Confidence: ${Math.round(input.cueEvidence.confidence * 100)}%` : "",
+      ]
+        .filter(Boolean)
+        .join("\n")
+    : "none";
+  const recentCueSummary = (input.recentCueHistory ?? [])
+    .map((cue) => `${Math.round(cue.timestamp / 1000)}s ${cue.severity}: ${cue.message}`)
+    .join("\n");
   const isBicepCurl = input.exerciseType === "bicep_curl";
   const isDance = input.exerciseType === "dance_basic";
+  const levelInstruction =
+    input.coachingLevel === "easy"
+      ? "Use a calm, non-irritating tone. Mention only the most important correction and include one positive anchor."
+      : input.coachingLevel === "hard"
+        ? "Be strict and precise. Judge elbow path, shoulder position, torso swing, wrist stack, range, symmetry, and tempo from the provided metrics."
+        : "Use balanced coaching: specific, short, and practical without sounding repetitive.";
 
   if (!clientInfo) {
     return {
@@ -755,6 +859,7 @@ export async function generateCoachFeedback(input: {
         content: isBicepCurl
           ? `You are an expert strength coach focused on highly accurate bicep curl feedback.
 Return exactly one short coaching cue (max 22 words).
+Coach level: ${input.coachingLevel ?? "normal"}. ${levelInstruction}
 Prioritize in order: injury risk -> elbow path -> shoulder shrug -> torso swing -> wrist stack -> range of motion -> symmetry.
 Name the exact body part and exact mechanic that is failing.
 Prefer language like: "left elbow drifting", "both shoulders shrugging", "right wrist folding", "torso swinging", "soft lockout", "full extension", "finish the squeeze".
@@ -775,6 +880,7 @@ If issueSignature indicates the same mechanic as before, keep the same mechanic 
       {
         role: "user",
         content: `Exercise: ${input.exerciseType}
+Coach level: ${input.coachingLevel ?? "normal"}
 Reps so far: ${input.repsSoFar}
 Current phase: ${input.phase ?? "unknown"}
 Tracking confidence: ${typeof input.confidence === "number" ? `${Math.round(input.confidence * 100)}%` : "unknown"}
@@ -783,6 +889,10 @@ Trigger reason: ${input.triggerReason ?? "manual"}
 Current issues: ${input.currentIssues.join(", ") || "none"}
 Current metrics:
 ${metricSummary || "none"}
+Selected rule evidence:
+${evidenceSummary}
+Recent emitted cues:
+${recentCueSummary || "none"}
 Recent scores:
 ${scoreSummary}
 

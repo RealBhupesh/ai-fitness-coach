@@ -1,5 +1,6 @@
 export type FeedbackSeverity = "critical" | "warning" | "info";
 export type FeedbackSource = "rule_engine" | "llm_coach" | "system";
+export type CoachLevel = "easy" | "normal" | "hard";
 
 export type FeedbackCue = {
   signature: string;
@@ -7,6 +8,13 @@ export type FeedbackCue = {
   secondaryNote?: string;
   severity: FeedbackSeverity;
   source: FeedbackSource;
+  metricName?: string;
+  side?: "left" | "right" | "both" | "body";
+  phase?: string;
+  score?: number;
+  value?: number;
+  target?: string;
+  confidence?: number;
 };
 
 export type FeedbackStateSnapshot = {
@@ -96,12 +104,12 @@ export function advanceFeedbackState(
     nextState.consecutiveFramesInIssue += 1;
   }
 
-  const lastSpokenAt = nextState.lastSpokenSignatureAt[cue.signature] ?? 0;
+  const lastSpokenAt = nextState.lastSpokenSignatureAt[cue.signature];
   const confidenceGate = options.confidenceGate ?? 0.66;
   const confidenceReady = options.confidence >= confidenceGate;
 
   if (cue.severity === "critical") {
-    if (options.now - lastSpokenAt >= REPEAT_COOLDOWN_MS.critical) {
+    if (lastSpokenAt === undefined || options.now - lastSpokenAt >= REPEAT_COOLDOWN_MS.critical) {
       nextState.lastSpokenSignatureAt[cue.signature] = options.now;
       nextState.lastEmittedSignature = cue.signature;
       nextState.lastEmittedAt = options.now;
@@ -127,7 +135,7 @@ export function advanceFeedbackState(
     return { nextState, shouldEmit: true, reason: "changed_stable" };
   }
 
-  if (options.now - lastSpokenAt >= REPEAT_COOLDOWN_MS[cue.severity]) {
+  if (lastSpokenAt !== undefined && options.now - lastSpokenAt >= REPEAT_COOLDOWN_MS[cue.severity]) {
     nextState.lastSpokenSignatureAt[cue.signature] = options.now;
     nextState.lastEmittedSignature = cue.signature;
     nextState.lastEmittedAt = options.now;
