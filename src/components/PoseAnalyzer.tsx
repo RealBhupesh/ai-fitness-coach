@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
+import Particles, { initParticlesEngine } from "@tsparticles/react";
+import { loadSlim } from "@tsparticles/slim";
 import { Brain, CheckCircle2, Clipboard, GripVertical, Maximize2, Mic, Minimize2, Monitor, RotateCcw, Smartphone, Target, Timer, Volume2, VolumeX, Waves, XCircle, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { SessionSetupCard } from "@/components/coach/SessionSetupCard";
@@ -851,6 +853,49 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   const replayThreeCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const replayThreeStateRef = useRef<ThreeHUDState | null>(null);
 
+  const [particlesInit, setParticlesInit] = useState(false);
+  const [sparkPosition, setSparkPosition] = useState<{ x: number; y: number } | null>(null);
+  const [showSparks, setShowSparks] = useState(false);
+
+  const particlesConfig = useMemo(() => {
+    if (!sparkPosition) return {};
+    return {
+      fullScreen: { enable: false },
+      fpsLimit: 60,
+      particles: {
+        number: { value: 0 },
+        color: { value: "#10b981" },
+        shape: { type: "circle" },
+        opacity: {
+          value: { min: 0.3, max: 0.8 },
+          animation: { enable: true, speed: 1.5, minimumValue: 0, sync: false }
+        },
+        size: {
+          value: { min: 3, max: 6 },
+          animation: { enable: true, speed: 4, minimumValue: 0.5, sync: false }
+        },
+        move: {
+          enable: true,
+          direction: "none",
+          speed: { min: 3, max: 9 },
+          random: true,
+          straight: false,
+          outModes: { default: "destroy" },
+          gravity: { enable: true, acceleration: 6 }
+        }
+      },
+      emitters: [
+        {
+          direction: "top",
+          rate: { quantity: 18, delay: 0.04 },
+          life: { duration: 0.45, count: 1 },
+          position: { x: sparkPosition.x, y: sparkPosition.y },
+          size: { width: 5, height: 5 }
+        }
+      ]
+    };
+  }, [sparkPosition]);
+
   const runDrawLoop = (landmarks: Landmark[] | null, score: number, exerciseId: ExerciseId, analysis?: FrameAnalysis) => {
     if (hudMode === "3d") {
       if (threeCanvasRef.current) {
@@ -1031,6 +1076,31 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       });
     } else if (frame.overall < 75) {
       setStreakCount(0);
+    }
+
+    // Joint Spark Particles on Excellent Reps!
+    if (frame.overall >= 88 && trackingFrameRef.current?.smoothedLandmarks) {
+      const landmarks = trackingFrameRef.current.smoothedLandmarks;
+      const activeExercise = exerciseIdRef.current;
+      let jointIdx = 11; // default left shoulder
+      
+      if (activeExercise === "squat" || activeExercise === "lunge" || activeExercise === "warrior") {
+        jointIdx = 25; // left knee
+      } else if (activeExercise === "bicep_curl" || activeExercise === "pushup" || activeExercise === "plank") {
+        jointIdx = 13; // left elbow
+      } else if (activeExercise === "jumping_jack") {
+        jointIdx = 15; // left wrist
+      }
+      
+      const pt = landmarks[jointIdx];
+      if (pt) {
+        const adjustedX = mirrorRef.current ? (1 - pt.x) : pt.x;
+        setSparkPosition({ x: adjustedX * 100, y: pt.y * 100 });
+        setShowSparks(true);
+        setTimeout(() => {
+          setShowSparks(false);
+        }, 1200);
+      }
     }
 
     // Muscle Fatigue Compensation Analysis
@@ -1728,6 +1798,14 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   }, []);
 
   useEffect(() => {
+    initParticlesEngine(async (engine) => {
+      await loadSlim(engine);
+    }).then(() => {
+      setParticlesInit(true);
+    });
+  }, []);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) return;
@@ -1876,6 +1954,13 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 h-full w-full z-20" />
       {hudMode === "3d" && (
         <canvas ref={threeCanvasRef} className="pointer-events-none absolute inset-0 h-full w-full z-10" />
+      )}
+      {showSparks && particlesInit && sparkPosition && (
+        <Particles
+          id="joint-sparks"
+          className="absolute inset-0 h-full w-full pointer-events-none z-30"
+          options={particlesConfig as any}
+        />
       )}
       {exerciseId === "bicep_curl" && curlReferenceOverlay ? (
         <div className="pointer-events-none absolute inset-0">
