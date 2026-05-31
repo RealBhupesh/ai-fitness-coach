@@ -246,6 +246,20 @@ export const userAchievements = pgTable("user_achievements", {
   progress: integer("progress").default(0),
 });
 
+export const coachMemories = pgTable("coach_memories", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }).unique(),
+  weakMetrics: text("weak_metrics"),
+  strongMetrics: text("strong_metrics"),
+  recurringIssues: text("recurring_issues"),
+  recommendedFocus: text("recommended_focus"),
+  preferredNextAction: text("preferred_next_action"),
+  lastDecision: text("last_decision"),
+  weeklySummary: text("weekly_summary"),
+  updatedAt: updatedAt(),
+  createdAt: createdAt(),
+});
+
 export const nutritionPlans = pgTable("nutrition_plans", {
   id: text("id").primaryKey(),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
@@ -349,3 +363,4 @@ export type ChatMessage = typeof chatMessages.$inferSelect;
 export type NewChatMessage = typeof chatMessages.$inferInsert;
 export type ChatSession = typeof chatSessions.$inferSelect;
 export type Notification = typeof notifications.$inferSelect;
+export type CoachMemory = typeof coachMemories.$inferSelect;

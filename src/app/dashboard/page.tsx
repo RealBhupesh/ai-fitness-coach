@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { Activity, Calendar, Clock, Flame, MessageSquare, Play, Sparkles, Target, TrendingUp } from "lucide-react";
+import { Activity, Bot, Calendar, Clock, Flame, MessageSquare, Play, Sparkles, Target, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -23,9 +23,34 @@ const emptySummary: DashboardSummary = {
   activeNutritionPlan: null,
 };
 
+type CoachAgentReport = {
+  memory: {
+    weakMetrics: string[];
+    strongMetrics: string[];
+    recurringIssues: string[];
+    recommendedFocus: string;
+    preferredNextAction: string;
+  };
+  preSessionBrief: {
+    priority: string;
+    reason: string;
+    evidence: string[];
+    nextAction: string;
+    planAdjustment?: string;
+    achievementRecommendation?: string;
+  };
+  weeklyReport: {
+    summary: string;
+    evidence: string[];
+    planAdjustment: string;
+  };
+  achievementRecommendation: string;
+};
+
 export default function DashboardPage() {
   const { profile } = useUserProfile();
   const [summary, setSummary] = useState<DashboardSummary>(emptySummary);
+  const [agent, setAgent] = useState<CoachAgentReport | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -47,6 +72,11 @@ export default function DashboardPage() {
             recentSessions: Array.isArray(data?.recentSessions) ? data.recentSessions : [],
             weightTrend: Array.isArray(data?.weightTrend) ? data.weightTrend : [],
           });
+        }
+        const agentResponse = await fetch("/api/coach/agent", { credentials: "include" });
+        if (agentResponse.ok) {
+          const agentData = await agentResponse.json();
+          if (!cancelled) setAgent(agentData);
         }
       } finally {
         if (!cancelled) {
@@ -113,6 +143,42 @@ export default function DashboardPage() {
           );
         })}
       </div>
+
+      {agent ? (
+        <Card className="border-cyan-500/20 bg-gradient-to-br from-cyan-500/10 to-fuchsia-500/10">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Bot className="h-5 w-5 text-cyan-500" />
+              Agentic Coach Brief
+            </CardTitle>
+            <CardDescription>The coach decides from saved scorecards, calories, reps, dance timing, achievements, and streak evidence.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4 lg:grid-cols-3">
+            <div className="rounded-xl border bg-background/70 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <p className="font-medium">Next best action</p>
+                <Badge className="capitalize">{agent.preSessionBrief.priority}</Badge>
+              </div>
+              <p className="mt-2 text-sm text-muted-foreground">{agent.preSessionBrief.nextAction}</p>
+              <p className="mt-3 text-xs text-muted-foreground">{agent.preSessionBrief.reason}</p>
+            </div>
+            <div className="rounded-xl border bg-background/70 p-4">
+              <p className="font-medium">Coach memory</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {[agent.memory.recommendedFocus, ...agent.memory.weakMetrics.slice(0, 3)].filter(Boolean).map((item) => (
+                  <Badge key={item} variant="secondary">{item}</Badge>
+                ))}
+              </div>
+              <p className="mt-3 text-sm text-muted-foreground">{agent.preSessionBrief.planAdjustment}</p>
+            </div>
+            <div className="rounded-xl border bg-background/70 p-4">
+              <p className="font-medium">Weekly agent report</p>
+              <p className="mt-2 text-sm text-muted-foreground">{agent.weeklyReport.summary}</p>
+              <p className="mt-3 text-xs text-muted-foreground">{agent.achievementRecommendation}</p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <div className="grid lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2">
