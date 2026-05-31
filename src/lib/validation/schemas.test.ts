@@ -24,6 +24,28 @@ const curlScorecard = {
   },
 };
 
+const squatScorecard = {
+  repNumber: 1,
+  overall: 86,
+  status: "pass",
+  bestPhase: "bottom",
+  worstMetric: "depth",
+  failedMetrics: [],
+  reliability: 100,
+  metrics: {
+    depth: {
+      key: "depth",
+      label: "Depth",
+      score: 88,
+      value: 98,
+      target: "86-108 degrees",
+      status: "pass",
+      reliable: true,
+      detail: "Depth is solid and controlled.",
+    },
+  },
+};
+
 describe("live curl evidence schemas", () => {
   it("accepts curl scorecards in workout rep data", () => {
     const parsed = workoutSessionInputSchema.safeParse({
@@ -69,6 +91,29 @@ describe("live curl evidence schemas", () => {
         reliabilityAverage: 88,
         updatedAt: "2026-05-24T00:00:00.000Z",
       },
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
+  it("accepts squat scorecards in workout rep data", () => {
+    const parsed = workoutSessionInputSchema.safeParse({
+      type: "strength",
+      exerciseType: "squat",
+      repData: [
+        {
+          exerciseId: "squat",
+          repNumber: 1,
+          phase: "top",
+          formScore: 86,
+          romScore: 88,
+          tempoScore: 84,
+          safetyScore: 90,
+          corrections: [],
+          durationMs: 2200,
+          squatScorecard,
+        },
+      ],
     });
 
     expect(parsed.success).toBe(true);

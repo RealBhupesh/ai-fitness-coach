@@ -196,6 +196,8 @@ export const exerciseReps = pgTable("exercise_reps", {
   corrections: text("corrections"),
   durationMs: integer("duration_ms"),
   timestamps: text("timestamps"),
+  curlScorecard: text("curl_scorecard"),
+  squatScorecard: text("squat_scorecard"),
   createdAt: createdAt(),
 });
 

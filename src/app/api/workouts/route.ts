@@ -6,6 +6,7 @@ import { exerciseReps, sessionFeedbackEvents, workoutExercises, workoutSessions 
 import { requireServerSession } from "@/lib/auth/session";
 import { isDemoUser } from "@/lib/dummy-auth";
 import { guardMutationRequest, getRequestIp } from "@/lib/security/request-guard";
+import { ensureAchievements } from "@/lib/server/app-data";
 import { workoutSessionInputSchema } from "@/lib/validation/schemas";
 import { toJson } from "@/lib/utils/json";
 
@@ -114,6 +115,8 @@ export async function POST(request: Request) {
           corrections: toJson(rep.corrections),
           durationMs: rep.durationMs,
           timestamps: rep.timestamps ? toJson(rep.timestamps) : null,
+          curlScorecard: rep.curlScorecard ? toJson(rep.curlScorecard) : null,
+          squatScorecard: rep.squatScorecard ? toJson(rep.squatScorecard) : null,
           createdAt: new Date(),
         })),
       );
@@ -134,7 +137,10 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json({ message: "Workout created successfully", sessionId });
+    const achievementState = await ensureAchievements(session.user.id);
+    const unlockedCount = achievementState.awards.length;
+
+    return NextResponse.json({ message: "Workout created successfully", sessionId, achievementsUnlocked: unlockedCount });
   } catch (error) {
     const status = error instanceof Error && error.message === "UNAUTHORIZED" ? 401 : 500;
     return NextResponse.json({ error: status === 401 ? "Unauthorized" : "Failed to create workout" }, { status });

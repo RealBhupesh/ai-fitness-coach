@@ -5,10 +5,11 @@ import { ensureAchievements } from "@/lib/server/app-data";
 export async function GET(request: Request) {
   try {
     const session = await requireServerSession(request);
-    const { allAchievements, awards } = await ensureAchievements(session.user.id);
+    const { allAchievements, awards, stats } = await ensureAchievements(session.user.id);
     const awardsMap = new Map(awards.map((award) => [award.achievementId, award]));
 
     return NextResponse.json({
+      stats,
       achievements: allAchievements.map((achievement) => {
         const award = awardsMap.get(achievement.id);
         return {

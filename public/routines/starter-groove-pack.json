@@ -1,7 +1,8 @@
 {
   "id": "starter-groove-pack",
-  "name": "Starter Groove Flow",
-  "description": "A beginner-friendly dance routine focused on frame width, soft-knee groove, centered torso control, and hitting the phrase on time.",
+  "name": "Hip-Hop Starter Groove",
+  "description": "A beginner-friendly hip-hop routine focused on wide arm hits, soft-knee groove, centered torso control, clean transitions, and landing each phrase on time.",
+  "style": "hip_hop",
   "difficulty": "beginner",
   "durationMs": 60000,
   "bpm": 96,

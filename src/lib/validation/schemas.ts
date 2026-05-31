@@ -145,6 +145,28 @@ const curlRepScorecardSchema = z.object({
   coachingLevel: z.enum(["easy", "normal", "hard"]),
 });
 
+const squatMetricGradeSchema = z.object({
+  key: z.string().min(1).max(80),
+  label: z.string().min(1).max(120),
+  score: z.number().min(0).max(100),
+  value: z.number().optional(),
+  target: z.string().max(120).optional(),
+  status: z.enum(["pass", "warning", "fail", "unreliable"]),
+  reliable: z.boolean(),
+  detail: z.string().max(300),
+});
+
+const squatRepScorecardSchema = z.object({
+  repNumber: z.number().int().min(1),
+  overall: z.number().min(0).max(100),
+  status: z.enum(["pass", "warning", "fail", "unreliable"]),
+  bestPhase: z.string().max(40),
+  worstMetric: z.string().max(80).optional(),
+  failedMetrics: z.array(z.string().min(1).max(120)).max(12),
+  metrics: z.record(z.string(), squatMetricGradeSchema),
+  reliability: z.number().min(0).max(100),
+});
+
 const curlEvidenceSchema = z.object({
   totalReps: z.number().int().min(0).max(5000),
   bestRep: z.number().int().min(1).optional(),
@@ -263,6 +285,7 @@ export const workoutSessionInputSchema = z.object({
           })
           .optional(),
         curlScorecard: curlRepScorecardSchema.nullable().optional(),
+        squatScorecard: squatRepScorecardSchema.nullable().optional(),
       }),
     )
     .default([]),

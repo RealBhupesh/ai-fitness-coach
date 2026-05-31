@@ -25,7 +25,7 @@ function sideFor(frame: FrameAnalysis): FeedbackCue["side"] {
 }
 
 function cueFromMetric(exerciseId: string, frame: FrameAnalysis, metric: LiveMetric, confidence?: number, coachLevel: CoachLevel = "normal"): FeedbackCue {
-  const severity: FeedbackCue["severity"] = metric.status === "critical" || (coachLevel === "hard" && metric.score < 62) ? "critical" : "warning";
+  const severity: FeedbackCue["severity"] = metric.status === "critical" ? "critical" : "warning";
   const side = sideFor(frame);
   return {
     message: metric.detail,

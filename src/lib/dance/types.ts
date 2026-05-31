@@ -25,10 +25,13 @@ export type DanceRoutineSegment = {
   targetLandmarks: Partial<Record<DanceRoutineTargetPoint, { x: number; y: number }>>;
 };
 
+export type DanceStyle = "hip_hop" | "general";
+
 export type DanceRoutinePack = {
   id: string;
   name: string;
   description: string;
+  style?: DanceStyle;
   difficulty: string;
   durationMs: number;
   bpm: number;
@@ -38,6 +41,25 @@ export type DanceRoutinePack = {
   segments: DanceRoutineSegment[];
 };
 
+export type DanceMetricKey =
+  | "poseShape"
+  | "grooveBounce"
+  | "armHits"
+  | "torsoControl"
+  | "timing"
+  | "transition";
+
+export type DanceMetricGrade = {
+  key: DanceMetricKey;
+  label: string;
+  score: number;
+  value?: number;
+  target?: string;
+  status: "pass" | "warning" | "fail" | "unreliable";
+  reliable: boolean;
+  detail: string;
+};
+
 export type DanceComparison = {
   segment: DanceRoutineSegment;
   poseSimilarity: number;
@@ -45,5 +67,9 @@ export type DanceComparison = {
   segmentCompletion: number;
   transitionQuality: number;
   overall: number;
+  metrics: Record<DanceMetricKey, DanceMetricGrade>;
+  failedMetrics: string[];
+  primaryIssue?: string;
+  reliability: number;
   notes: string[];
 };

@@ -178,7 +178,7 @@ function metricFromFrames(key: CurlMetricKey, frames: TimedFrameAnalysis[], dura
     .filter((metric): metric is LiveMetric => Boolean(metric));
   const reliable = candidates.filter((metric) => metric.reliable !== false);
   const pool = reliable.length ? reliable : candidates;
-  const selected = pool.sort((a, b) => a.score - b.score)[0];
+  const selected = [...pool].sort((a, b) => a.score - b.score)[0];
 
   if (!selected) {
     return {
@@ -226,7 +226,7 @@ export function buildCurlRepScorecard(options: {
   const overall = scorePool.length ? Math.round(average(scorePool.map((metric) => metric.score))) : 0;
   const failed = scorePool.filter((metric) => metric.status === "fail");
   const warning = scorePool.filter((metric) => metric.status === "warning");
-  const worst = scorePool.sort((a, b) => a.score - b.score)[0];
+  const worst = [...scorePool].sort((a, b) => a.score - b.score)[0];
   const baselineWeak = options.coachingLevel === "hard" && options.baseline && !options.baseline.ready;
   const status: CurlRepScorecard["status"] = baselineWeak || reliability < 50 ? "unreliable" : failed.length ? "fail" : warning.length ? "warning" : "pass";
 
@@ -234,7 +234,7 @@ export function buildCurlRepScorecard(options: {
     repNumber: options.repNumber,
     overall,
     status,
-    bestPhase: options.frames.sort((a, b) => b.analysis.overall - a.analysis.overall)[0]?.analysis.phase ?? "unknown",
+    bestPhase: [...options.frames].sort((a, b) => b.analysis.overall - a.analysis.overall)[0]?.analysis.phase ?? "unknown",
     worstMetric: worst?.key,
     failedMetrics: failed.map((metric) => metric.label),
     metrics,

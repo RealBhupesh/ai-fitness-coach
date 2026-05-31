@@ -111,4 +111,21 @@ describe("feedback cue selection", () => {
     expect(hardCue.metricName).toBe("Shoulder Stability");
     expect(easyCue.severity).toBe("info");
   });
+
+  it("keeps hard-mode technique misses below safety-critical severity", () => {
+    const cue = selectFeedbackCue(
+      "bicep_curl",
+      frame({
+        phase: "curling",
+        trackedSide: "left",
+        metrics: [{ name: "Elbow Path", score: 48, detail: "Keep your left elbow pinned beside your ribs.", status: "warning", reliable: true }],
+      }),
+      safetyOk,
+      0.9,
+      { coachLevel: "hard" },
+    );
+
+    expect(cue.severity).toBe("warning");
+    expect(cue.metricName).toBe("Elbow Path");
+  });
 });

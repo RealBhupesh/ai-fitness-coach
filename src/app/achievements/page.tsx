@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Trophy, Lock, Sparkles, Crown, Calendar, Target } from "lucide-react";
+import { Trophy, Lock, Sparkles, Crown, Calendar, Target, Flame, Dumbbell, Music2, Repeat2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -22,6 +22,21 @@ type AchievementRecord = {
   unlockedDate: string | null;
 };
 
+type AchievementStats = {
+  totalSessions: number;
+  totalCalories: number;
+  totalReps: number;
+  danceSessionsCount: number;
+  strengthSessionsCount: number;
+  bestCompositeScore: number;
+  highScoreSessions: number;
+  curlScorecards: number;
+  squatScorecards: number;
+  danceScoreSessions: number;
+  currentStreak: number;
+  weeklySessionPeak: number;
+};
+
 const rarityByPoints = (points: number) => {
   if (points >= 500) return "legendary";
   if (points >= 250) return "epic";
@@ -39,6 +54,7 @@ const rarityStyles = {
 export default function AchievementsPage() {
   const [category, setCategory] = useState("all");
   const [achievements, setAchievements] = useState<AchievementRecord[]>([]);
+  const [stats, setStats] = useState<AchievementStats | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -49,9 +65,15 @@ export default function AchievementsPage() {
         const response = await fetch("/api/achievements", { cache: "no-store" });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Failed to load achievements");
-        if (active) setAchievements(data.achievements ?? []);
+        if (active) {
+          setAchievements(data.achievements ?? []);
+          setStats(data.stats ?? null);
+        }
       } catch {
-        if (active) setAchievements([]);
+        if (active) {
+          setAchievements([]);
+          setStats(null);
+        }
       } finally {
         if (active) setLoading(false);
       }
@@ -75,6 +97,12 @@ export default function AchievementsPage() {
   );
   const totalPoints = unlocked.reduce((sum, item) => sum + item.points, 0);
   const level = Math.floor(totalPoints / 100) + 1;
+  const statCards = [
+    { label: "Calories", value: stats?.totalCalories ?? 0, icon: Flame, tone: "text-orange-500" },
+    { label: "Live reps", value: stats?.totalReps ?? 0, icon: Repeat2, tone: "text-cyan-500" },
+    { label: "Strength", value: stats?.strengthSessionsCount ?? 0, icon: Dumbbell, tone: "text-emerald-500" },
+    { label: "Dance", value: stats?.danceSessionsCount ?? 0, icon: Music2, tone: "text-fuchsia-500" },
+  ];
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-6 lg:p-8">
@@ -117,13 +145,54 @@ export default function AchievementsPage() {
         </Card>
       </div>
 
+      <div className="grid gap-4 md:grid-cols-4">
+        {statCards.map((item) => {
+          const Icon = item.icon;
+          return (
+            <Card key={item.label}>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm text-muted-foreground">{item.label}</p>
+                    <p className="mt-1 text-2xl font-bold">{item.value.toLocaleString()}</p>
+                  </div>
+                  <Icon className={`h-7 w-7 ${item.tone}`} />
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+
+      <Card>
+        <CardContent className="grid gap-4 pt-6 md:grid-cols-4">
+          <div>
+            <p className="text-sm text-muted-foreground">Current streak</p>
+            <p className="mt-1 text-xl font-semibold">{stats?.currentStreak ?? 0} days</p>
+          </div>
+          <div>
+            <p className="text-sm text-muted-foreground">Best score</p>
+            <p className="mt-1 text-xl font-semibold">{stats?.bestCompositeScore ?? 0}</p>
+          </div>
+          <div>
+            <p className="text-sm text-muted-foreground">Fitness scorecards</p>
+            <p className="mt-1 text-xl font-semibold">{(stats?.curlScorecards ?? 0) + (stats?.squatScorecards ?? 0)}</p>
+          </div>
+          <div>
+            <p className="text-sm text-muted-foreground">Dance evidence</p>
+            <p className="mt-1 text-xl font-semibold">{stats?.danceScoreSessions ?? 0} sessions</p>
+          </div>
+        </CardContent>
+      </Card>
+
       <Tabs value={category} onValueChange={setCategory}>
-        <TabsList className="grid w-full grid-cols-5 md:w-[720px]">
+        <TabsList className="grid w-full grid-cols-6 md:w-[840px]">
           <TabsTrigger value="all">All</TabsTrigger>
           <TabsTrigger value="milestone">Milestone</TabsTrigger>
           <TabsTrigger value="consistency">Consistency</TabsTrigger>
-          <TabsTrigger value="workout">Workout</TabsTrigger>
-          <TabsTrigger value="nutrition">Nutrition</TabsTrigger>
+          <TabsTrigger value="fitness">Fitness</TabsTrigger>
+          <TabsTrigger value="dance">Dance</TabsTrigger>
+          <TabsTrigger value="calories">Calories</TabsTrigger>
         </TabsList>
       </Tabs>
 

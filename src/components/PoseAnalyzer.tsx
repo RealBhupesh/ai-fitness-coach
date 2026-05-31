@@ -37,6 +37,13 @@ import { advancePhaseTracker, analyzeExercise, createPhaseTrackerState, EXERCISE
 import { average, angle, distance } from "@/lib/pose/math";
 import { evaluateSafety } from "@/lib/pose/safety";
 import { createSessionAnalysisBuffer, finalizeSessionAnalysis, recordCue, recordFrame, recordTelemetry } from "@/lib/pose/session-buffer";
+import {
+  buildSquatRepScorecard,
+  getSquatMetricLabel,
+  summarizeSquatEvidence,
+  type SquatMetricKey,
+  type SquatRepScorecard,
+} from "@/lib/pose/squat-scorecard";
 import { createPoseTrackingEngine } from "@/lib/pose/tracking-engine";
 import type { ConfidenceStatus, ExerciseId, FrameAnalysis, Landmark, SessionAnalysisBuffer, SessionTelemetryEvent, TrackingFrame } from "@/lib/pose/types";
 
@@ -161,6 +168,7 @@ function normalizeDanceRoutine(raw: any): DanceRoutinePack | null {
     id: String(raw.id),
     name: String(raw.name),
     description: typeof raw.description === "string" ? raw.description : "Dance routine pack",
+    style: raw.style === "hip_hop" ? "hip_hop" : "general",
     difficulty: typeof raw.difficulty === "string" ? raw.difficulty : "beginner",
     durationMs: Number(raw.durationMs ?? 0),
     bpm: Number(raw.bpm ?? 96),
@@ -191,8 +199,8 @@ function getActiveDanceCheckpoint(routine: DanceRoutinePack | null, elapsedMs: n
 function scorecardLabels(exerciseId: ExerciseId) {
   if (exerciseId === "dance_basic") {
     return [
-      { label: "Frame width", valueKey: "elbowPath" as const },
-      { label: "Arm lines", valueKey: "rangeOfMotion" as const },
+      { label: "Hip-hop shape", valueKey: "elbowPath" as const },
+      { label: "Groove bounce", valueKey: "rangeOfMotion" as const },
       { label: "Beat timing", valueKey: "tempoControl" as const },
       { label: "Torso control", valueKey: "torsoStability" as const },
     ];
@@ -785,6 +793,8 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   const curlCalibrationFramesRef = useRef<TrackingFrame[]>([]);
   const curlFrameHistoryRef = useRef<Array<{ timestampMs: number; analysis: FrameAnalysis }>>([]);
   const curlRepScorecardsRef = useRef<CurlRepScorecard[]>([]);
+  const squatFrameHistoryRef = useRef<Array<{ timestampMs: number; analysis: FrameAnalysis }>>([]);
+  const squatRepScorecardsRef = useRef<SquatRepScorecard[]>([]);
   const eventsRef = useRef<FeedbackEvent[]>([]);
   const framesRef = useRef<FrameAnalysis[]>([]);
   const curveRef = useRef<number[]>([]);
@@ -821,6 +831,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   const [correctivePlan, setCorrectivePlan] = useState<CorrectiveBlock[]>([]);
   const [curlBaseline, setCurlBaseline] = useState<CurlBaseline | null>(null);
   const [curlRepScorecards, setCurlRepScorecards] = useState<CurlRepScorecard[]>([]);
+  const [squatRepScorecards, setSquatRepScorecards] = useState<SquatRepScorecard[]>([]);
   const [curlCoachMemory, setCurlCoachMemory] = useState<CurlCoachMemory | null>(null);
   const [curlDemoActive, setCurlDemoActive] = useState(false);
   const [curlReferenceOverlay, setCurlReferenceOverlay] = useState(true);
@@ -971,6 +982,8 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     curlCalibrationFramesRef.current = [];
     curlFrameHistoryRef.current = [];
     curlRepScorecardsRef.current = [];
+    squatFrameHistoryRef.current = [];
+    squatRepScorecardsRef.current = [];
     eventsRef.current = [];
     framesRef.current = [];
     curveRef.current = [];
@@ -996,6 +1009,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     setCorrectivePlan([]);
     setCurlBaseline(null);
     setCurlRepScorecards([]);
+    setSquatRepScorecards([]);
     setCurlDemoActive(false);
     setReportCopied(false);
     curlBaselineRef.current = null;
@@ -1043,9 +1057,21 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
             baseline: curlBaselineRef.current,
           })
         : null;
+    const squatScorecard =
+      exerciseIdRef.current === "squat"
+        ? buildSquatRepScorecard({
+            repNumber: repsRef.current,
+            frames: squatFrameHistoryRef.current.filter((point) => point.timestampMs >= previousPhaseState.cycleStartedAt && point.timestampMs <= now),
+            durationMs,
+          })
+        : null;
     if (curlScorecard) {
       curlRepScorecardsRef.current = [...curlRepScorecardsRef.current, curlScorecard];
       setCurlRepScorecards(curlRepScorecardsRef.current);
+    }
+    if (squatScorecard) {
+      squatRepScorecardsRef.current = [...squatRepScorecardsRef.current, squatScorecard];
+      setSquatRepScorecards(squatRepScorecardsRef.current);
     }
     repDataRef.current.push({
       exerciseId: exerciseIdRef.current,
@@ -1062,6 +1088,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
         endMs: Math.max(0, now - startedAtRef.current),
       },
       curlScorecard,
+      squatScorecard,
     });
 
     // Streak Counter Logic
@@ -1130,6 +1157,14 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                 ? `Watch ${curlScorecard.metrics[curlScorecard.worstMetric].label.toLowerCase()}.`
                 : "Review the scorecard."
           }`
+        : squatScorecard
+          ? `Rep ${repsRef.current}: ${squatScorecard.overall}. ${
+              squatScorecard.status === "pass"
+                ? "Clean squat."
+                : squatScorecard.worstMetric
+                  ? `Watch ${squatScorecard.metrics[squatScorecard.worstMetric].label.toLowerCase()}.`
+                  : "Review the squat scorecard."
+            }`
         : `Rep ${repsRef.current} counted. ${frame.corrections[0] ?? frame.positives[0] ?? "Keep moving with control."}`,
       severity: "info",
       source: "system",
@@ -1245,6 +1280,11 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
         curlBaselineRef.current = null;
         setCurlBaseline(null);
       }
+      if (currentId !== "squat") {
+        squatFrameHistoryRef.current = [];
+        squatRepScorecardsRef.current = [];
+        setSquatRepScorecards([]);
+      }
       showStatus(gate.message);
       setTrackingPausedReason(null);
       runDrawLoop(trackingFrame.smoothedLandmarks, 80, currentId);
@@ -1310,6 +1350,9 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     if (currentId === "bicep_curl") {
       curlFrameHistoryRef.current = [...curlFrameHistoryRef.current.slice(-180), { timestampMs: now, analysis: resolved }];
     }
+    if (currentId === "squat") {
+      squatFrameHistoryRef.current = [...squatFrameHistoryRef.current.slice(-180), { timestampMs: now, analysis: resolved }];
+    }
     if (framesRef.current.length % 15 === 0) curveRef.current.push(resolved.overall);
     recordFrame(sessionBufferRef.current, trackingFrame, resolved);
     if (!shouldPauseRepTracking) maybeRep(phaseUpdate, previousPhaseState, resolved, now);
@@ -1320,6 +1363,12 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       const comparison = compareDanceFrame({ landmarks: trackingFrame.smoothedLandmarks, routine: danceRoutineRef.current, elapsedMs, analysis: resolved });
       setDanceComparison(comparison);
       if (comparison) {
+        setTechniqueScorecard({
+          elbowPath: comparison.metrics.poseShape.score,
+          rangeOfMotion: comparison.metrics.grooveBounce.score,
+          tempoControl: comparison.metrics.timing.score,
+          torsoStability: comparison.metrics.torsoControl.score,
+        });
         const bucket = danceSegmentRef.current[comparison.segment.id] ?? { label: comparison.segment.label, scores: [], timing: [], transition: [] };
         bucket.scores.push(comparison.overall);
         bucket.timing.push(comparison.timingScore);
@@ -1424,11 +1473,14 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     if (!options.preserveResults) {
       setCurlBaseline(null);
       setCurlRepScorecards([]);
+      setSquatRepScorecards([]);
       curlBaselineRef.current = null;
       curlRepScorecardsRef.current = [];
+      squatRepScorecardsRef.current = [];
     }
     curlCalibrationFramesRef.current = [];
     curlFrameHistoryRef.current = [];
+    squatFrameHistoryRef.current = [];
     setCalibrationHoldProgress(0);
     calibrationHoldFramesRef.current = 0;
     voiceRef.current.stop();
@@ -1919,6 +1971,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   const liveIssues = useMemo(() => [...analysis.injuryRisks, ...analysis.corrections, ...analysis.issues].slice(0, 5), [analysis]);
   const coachLevelDetail = useMemo(() => COACH_LEVELS.find((item) => item.id === coachLevel)?.detail ?? COACH_LEVELS[1].detail, [coachLevel]);
   const curlEvidence = useMemo(() => (exerciseId === "bicep_curl" ? summarizeCurlEvidence(curlRepScorecards) : null), [curlRepScorecards, exerciseId]);
+  const squatEvidence = useMemo(() => (exerciseId === "squat" ? summarizeSquatEvidence(squatRepScorecards) : null), [squatRepScorecards, exerciseId]);
   const curlFocus = useMemo(() => buildCurlFocus(curlRepScorecards, curlCoachMemory), [curlCoachMemory, curlRepScorecards]);
   const teacherReport = useMemo(() => buildTeacherReport(curlEvidence, curlCoachMemory), [curlCoachMemory, curlEvidence]);
   const setupSteps = useMemo(
@@ -2501,6 +2554,63 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                     )}
                   </div>
                 ) : null}
+                {exerciseId === "squat" ? (
+                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Squat accuracy</p>
+                        <p className="mt-2 text-sm text-zinc-300">Rep scorecards track depth, knee tracking, torso stack, hip centering, symmetry, shoulder stability, and tempo.</p>
+                      </div>
+                      {squatEvidence?.totalReps ? <Badge className="w-fit bg-emerald-500/15 text-emerald-300">{squatEvidence.totalReps} scored reps</Badge> : null}
+                    </div>
+                    {squatEvidence?.totalReps ? (
+                      <div className="mt-4 grid gap-2 sm:grid-cols-4">
+                        <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
+                          <p className="text-xs text-zinc-500">Average</p>
+                          <p className={cn("mt-1 text-xl font-semibold", text(squatEvidence.averageScore))}>{squatEvidence.averageScore}</p>
+                        </div>
+                        <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
+                          <p className="text-xs text-zinc-500">Best</p>
+                          <p className="mt-1 text-xl font-semibold text-emerald-300">Rep {squatEvidence.bestRep}</p>
+                        </div>
+                        <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
+                          <p className="text-xs text-zinc-500">Worst</p>
+                          <p className="mt-1 text-xl font-semibold text-rose-300">Rep {squatEvidence.worstRep}</p>
+                        </div>
+                        <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
+                          <p className="text-xs text-zinc-500">Reliability</p>
+                          <p className="mt-1 text-xl font-semibold text-cyan-300">{squatEvidence.reliabilityAverage}%</p>
+                        </div>
+                      </div>
+                    ) : null}
+                    {squatRepScorecards.length ? (
+                      <div className="mt-4 overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
+                        <p className="mb-3 text-xs uppercase tracking-[0.24em] text-zinc-500">Squat rep heatmap</p>
+                        <div className="grid min-w-[620px] gap-2" style={{ gridTemplateColumns: "80px repeat(7, minmax(70px, 1fr))" }}>
+                          <div className="text-xs text-zinc-500">Rep</div>
+                          {(["depth", "kneeTracking", "torsoStack", "hipCentering", "symmetry", "shoulderStability", "tempo"] as SquatMetricKey[]).map((key) => (
+                            <div key={key} className="truncate text-xs text-zinc-500">{getSquatMetricLabel(key)}</div>
+                          ))}
+                          {squatRepScorecards.map((rep) => (
+                            <div key={`squat-rep-row-${rep.repNumber}`} className="contents">
+                              <div className="text-sm font-medium text-zinc-100">Rep {rep.repNumber}</div>
+                              {(["depth", "kneeTracking", "torsoStack", "hipCentering", "symmetry", "shoulderStability", "tempo"] as SquatMetricKey[]).map((key) => {
+                                const metric = rep.metrics[key];
+                                return (
+                                  <div key={`${rep.repNumber}-${key}`} className={cn("rounded-md border px-2 py-1 text-xs text-zinc-100", metricTone(metric.status))}>
+                                    {metric.reliable ? metric.score : "n/a"}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="mt-4 text-sm text-zinc-400">Squat scorecards will appear here after each completed rep.</p>
+                    )}
+                  </div>
+                ) : null}
                 {liveIssues.length ? (
                   <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
                     <p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Active issue history</p>
@@ -2519,20 +2629,46 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
             {mode === "dance" ? (
               <Card className="border-zinc-800 bg-zinc-950/70 text-zinc-100">
                 <CardHeader>
-                  <CardTitle>Routine sync</CardTitle>
-                  <CardDescription className="text-zinc-400">Packaged routine assets drive the active phrase, timing score, and post-run breakdown.</CardDescription>
+                  <CardTitle>Hip-hop routine sync</CardTitle>
+                  <CardDescription className="text-zinc-400">Packaged phrase checkpoints drive pose shape, groove bounce, timing, and transition scoring.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-                    <p className="text-sm font-medium text-zinc-100">{danceRoutine?.name ?? "Loading routine"}</p>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="text-sm font-medium text-zinc-100">{danceRoutine?.name ?? "Loading routine"}</p>
+                      <Badge className="w-fit bg-fuchsia-500/15 text-fuchsia-200">{danceRoutine?.style === "hip_hop" ? "Hip-hop" : "Dance"}</Badge>
+                    </div>
                     <p className="mt-1 text-sm text-zinc-400">{activeDanceCheckpoint?.step.cue ?? "Waiting for the first phrase."}</p>
                   </div>
                   {danceComparison ? (
-                    <div className="grid gap-3 sm:grid-cols-3">
-                      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4"><p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Pose</p><p className="mt-2 text-2xl font-semibold">{danceComparison.poseSimilarity}</p></div>
-                      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4"><p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Timing</p><p className="mt-2 text-2xl font-semibold">{danceComparison.timingScore}</p></div>
-                      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4"><p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Transition</p><p className="mt-2 text-2xl font-semibold">{danceComparison.transitionQuality}</p></div>
-                    </div>
+                    <>
+                      <div className="grid gap-3 sm:grid-cols-4">
+                        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4"><p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Shape</p><p className="mt-2 text-2xl font-semibold">{danceComparison.poseSimilarity}</p></div>
+                        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4"><p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Timing</p><p className="mt-2 text-2xl font-semibold">{danceComparison.timingScore}</p></div>
+                        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4"><p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Transition</p><p className="mt-2 text-2xl font-semibold">{danceComparison.transitionQuality}</p></div>
+                        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4"><p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Reliability</p><p className="mt-2 text-2xl font-semibold">{danceComparison.reliability}%</p></div>
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {Object.values(danceComparison.metrics).map((metric) => (
+                          <div key={metric.key} className={cn("rounded-xl border px-3 py-3", metricTone(metric.status))}>
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="text-sm font-medium text-zinc-100">{metric.label}</p>
+                                <p className="mt-1 text-xs text-zinc-400">{metric.detail}</p>
+                                {metric.target ? <p className="mt-1 text-[11px] text-zinc-500">Target: {metric.target}</p> : null}
+                              </div>
+                              <span className={cn("text-sm font-semibold", text(metric.score))}>{metric.reliable ? metric.score : "n/a"}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      {danceComparison.notes.length ? (
+                        <div className="rounded-2xl border border-fuchsia-500/25 bg-fuchsia-500/10 p-4">
+                          <p className="text-xs uppercase tracking-[0.24em] text-fuchsia-200/70">Primary hip-hop correction</p>
+                          <p className="mt-2 text-sm text-zinc-200">{danceComparison.notes[0]}</p>
+                        </div>
+                      ) : null}
+                    </>
                   ) : null}
                   {danceSegmentBreakdown.length ? (
                     <div className="space-y-2">

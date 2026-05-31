@@ -1,0 +1,1 @@
+ALTER TABLE "exercise_reps" ADD COLUMN "squat_scorecard" text;

@@ -1,7 +1,8 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { AppUserProfile, DashboardSummary, Goal } from "@/lib/app-types";
 import { db } from "@/db";
+import { isDemoUser } from "@/lib/dummy-auth";
 import {
   achievements,
   chatSessions,
@@ -17,6 +18,49 @@ import {
   workoutSessions,
 } from "@/db/schema";
 import { parseJsonArray, parseJsonObject, toJson } from "@/lib/utils/json";
+
+type AchievementDefinition = {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  icon: string;
+  threshold: number;
+  points: number;
+};
+
+export type AchievementStats = {
+  totalSessions: number;
+  totalCalories: number;
+  totalReps: number;
+  danceSessionsCount: number;
+  strengthSessionsCount: number;
+  bestCompositeScore: number;
+  highScoreSessions: number;
+  curlScorecards: number;
+  squatScorecards: number;
+  danceScoreSessions: number;
+  currentStreak: number;
+  weeklySessionPeak: number;
+};
+
+const ACHIEVEMENT_DEFINITIONS: AchievementDefinition[] = [
+  { id: "ach_first_steps", name: "First Steps", description: "Complete your first fitness or dance session", category: "milestone", icon: "👟", threshold: 1, points: 10 },
+  { id: "ach_week_warrior", name: "Week Warrior", description: "Build a 7-day training streak", category: "consistency", icon: "🔥", threshold: 7, points: 50 },
+  { id: "ach_month_master", name: "Month Master", description: "Build a 30-day training streak", category: "consistency", icon: "💪", threshold: 30, points: 200 },
+  { id: "ach_century_club", name: "Century Club", description: "Complete 100 total sessions", category: "workout", icon: "🎯", threshold: 100, points: 500 },
+  { id: "ach_calorie_crusher", name: "Calorie Crusher", description: "Burn 10,000 total calories across saved sessions", category: "calories", icon: "🔥", threshold: 10000, points: 300 },
+  { id: "ach_dance_master", name: "Dance Master", description: "Complete 50 dance sessions", category: "dance", icon: "💃", threshold: 50, points: 250 },
+  { id: "ach_strength_legend", name: "Strength Legend", description: "Complete 100 strength training sessions", category: "fitness", icon: "🏋️", threshold: 100, points: 400 },
+  { id: "ach_perfect_week", name: "Perfect Week", description: "Complete 7 sessions in one calendar week", category: "consistency", icon: "⭐", threshold: 7, points: 100 },
+  { id: "ach_transformation", name: "Transformation", description: "Complete 90 total training days", category: "milestone", icon: "🦋", threshold: 90, points: 1000 },
+  { id: "ach_rep_collector", name: "Rep Collector", description: "Log 250 counted reps from live coaching", category: "fitness", icon: "🔢", threshold: 250, points: 120 },
+  { id: "ach_form_scholar", name: "Form Scholar", description: "Finish 10 sessions with a score of 85 or higher", category: "fitness", icon: "📈", threshold: 10, points: 150 },
+  { id: "ach_curl_technician", name: "Curl Technician", description: "Save 25 bicep curl reps with scorecard evidence", category: "fitness", icon: "💪", threshold: 25, points: 120 },
+  { id: "ach_squat_foundation", name: "Squat Foundation", description: "Save 25 squat reps with scorecard evidence", category: "fitness", icon: "🦵", threshold: 25, points: 120 },
+  { id: "ach_hip_hop_debut", name: "Hip-Hop Debut", description: "Complete your first hip-hop dance session", category: "dance", icon: "🎧", threshold: 1, points: 30 },
+  { id: "ach_groove_builder", name: "Groove Builder", description: "Complete 10 dance sessions with saved timing and phrase evidence", category: "dance", icon: "🕺", threshold: 10, points: 120 },
+];
 
 export function mapProfileToApp(user: { id: string; email: string; name: string } | null, profile: typeof userProfiles.$inferSelect | null): AppUserProfile | null {
   if (!user) return null;
@@ -113,6 +157,101 @@ export function calculateStreak(sessionDates: Date[]) {
     cursor.setDate(cursor.getDate() - 1);
   }
   return streak;
+}
+
+function calculateWeeklySessionPeak(sessionDates: Date[]) {
+  const counts = new Map<string, number>();
+  sessionDates.forEach((date) => {
+    const copy = new Date(date);
+    const day = copy.getDay();
+    copy.setDate(copy.getDate() - day);
+    const key = normalizeDate(copy);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  });
+  return Math.max(0, ...counts.values());
+}
+
+function safeParseObject(value: string | null) {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function countScorecardReps(reps: Array<{ curlScorecard?: string | null; squatScorecard?: string | null }>) {
+  return reps.reduce(
+    (acc, rep) => {
+      if (safeParseObject(rep.curlScorecard ?? null)) acc.curl += 1;
+      if (safeParseObject(rep.squatScorecard ?? null)) acc.squat += 1;
+      return acc;
+    },
+    { curl: 0, squat: 0 },
+  );
+}
+
+function countDanceEvidenceSessions(sessions: Array<{ type: string; telemetry?: string | null; postSetAnalysis?: string | null }>) {
+  return sessions.filter((session) => {
+    if (session.type !== "dance") return false;
+    const telemetry = safeParseObject(session.telemetry ?? null);
+    const postSet = safeParseObject(session.postSetAnalysis ?? null);
+    return Boolean(telemetry || postSet);
+  }).length;
+}
+
+export function buildAchievementProgress(stats: AchievementStats) {
+  const progress: Record<string, number> = {
+    "First Steps": stats.totalSessions,
+    "Week Warrior": stats.currentStreak,
+    "Month Master": stats.currentStreak,
+    "Century Club": stats.totalSessions,
+    "Calorie Crusher": stats.totalCalories,
+    "Dance Master": stats.danceSessionsCount,
+    "Strength Legend": stats.strengthSessionsCount,
+    "Perfect Week": stats.weeklySessionPeak,
+    Transformation: Math.min(90, stats.totalSessions),
+    "Rep Collector": stats.totalReps,
+    "Form Scholar": stats.highScoreSessions,
+    "Curl Technician": stats.curlScorecards,
+    "Squat Foundation": stats.squatScorecards,
+    "Hip-Hop Debut": stats.danceSessionsCount,
+    "Groove Builder": stats.danceScoreSessions,
+  };
+  return progress;
+}
+
+async function ensureAchievementCatalog() {
+  const existing = await db.query.achievements.findMany();
+  const existingNames = new Set(existing.map((achievement) => achievement.name));
+  const missing = ACHIEVEMENT_DEFINITIONS.filter((achievement) => !existingNames.has(achievement.name));
+  if (missing.length) {
+    await db.insert(achievements).values(missing).onConflictDoNothing();
+  }
+  for (const definition of ACHIEVEMENT_DEFINITIONS) {
+    const current = existing.find((achievement) => achievement.name === definition.name);
+    if (!current) continue;
+    if (
+      current.description !== definition.description ||
+      current.category !== definition.category ||
+      current.icon !== definition.icon ||
+      current.threshold !== definition.threshold ||
+      current.points !== definition.points
+    ) {
+      await db
+        .update(achievements)
+        .set({
+          description: definition.description,
+          category: definition.category,
+          icon: definition.icon,
+          threshold: definition.threshold,
+          points: definition.points,
+        })
+        .where(eq(achievements.id, current.id));
+    }
+  }
+  return db.query.achievements.findMany({ orderBy: [desc(achievements.points)] });
 }
 
 export async function getDashboardSummary(userId: string): Promise<DashboardSummary> {
@@ -316,29 +455,41 @@ export function buildFallbackNutritionPlan(profile: AppUserProfile | null) {
 
 export async function ensureAchievements(userId: string) {
   const [allAchievements, sessions, currentAwards] = await Promise.all([
-    db.query.achievements.findMany({ orderBy: [desc(achievements.points)] }),
+    ensureAchievementCatalog(),
     db.query.workoutSessions.findMany({ where: eq(workoutSessions.userId, userId) }),
     db.query.userAchievements.findMany({ where: eq(userAchievements.userId, userId) }),
   ]);
+  const sessionIds = sessions.map((session) => session.id);
+  const reps = sessionIds.length
+    ? await db.query.exerciseReps.findMany({
+        where: inArray(exerciseReps.sessionId, sessionIds),
+      })
+    : [];
 
   const awardedIds = new Set(currentAwards.map((award) => award.achievementId));
   const totalCalories = sessions.reduce((sum, session) => sum + (session.caloriesBurned ?? 0), 0);
   const danceSessionsCount = sessions.filter((session) => session.type === "dance").length;
   const strengthSessionsCount = sessions.filter((session) => session.type === "strength").length;
-  const streak = calculateStreak(sessions.map((session) => session.date));
-
-  const progressByName: Record<string, number> = {
-    "First Steps": sessions.length,
-    "Week Warrior": streak,
-    "Month Master": streak,
-    "Century Club": sessions.length,
-    "Calorie Crusher": totalCalories,
-    "Dance Master": danceSessionsCount,
-    "Strength Legend": strengthSessionsCount,
-    "Perfect Week": streak >= 7 ? 1 : 0,
-    "Early Bird": Math.floor(sessions.length / 3),
-    Transformation: Math.min(90, sessions.length),
+  const scorecardCounts = countScorecardReps(reps);
+  const stats: AchievementStats = {
+    totalSessions: sessions.length,
+    totalCalories,
+    totalReps: sessions.reduce((sum, session) => sum + (session.totalReps ?? 0), 0),
+    danceSessionsCount,
+    strengthSessionsCount,
+    bestCompositeScore: Math.max(0, ...sessions.map((session) => session.compositeScore ?? 0)),
+    highScoreSessions: sessions.filter((session) => (session.compositeScore ?? 0) >= 85).length,
+    curlScorecards: scorecardCounts.curl,
+    squatScorecards: scorecardCounts.squat,
+    danceScoreSessions: countDanceEvidenceSessions(sessions),
+    currentStreak: calculateStreak(sessions.map((session) => session.date)),
+    weeklySessionPeak: calculateWeeklySessionPeak(sessions.map((session) => session.date)),
   };
+  const progressByName = buildAchievementProgress(stats);
+
+  if (isDemoUser(userId)) {
+    return { allAchievements, awards: [], stats };
+  }
 
   for (const achievement of allAchievements) {
     const progress = progressByName[achievement.name] ?? 0;
@@ -363,7 +514,7 @@ export async function ensureAchievements(userId: string) {
   }
 
   const awards = await db.query.userAchievements.findMany({ where: eq(userAchievements.userId, userId) });
-  return { allAchievements, awards };
+  return { allAchievements, awards, stats };
 }
 
 export async function getDanceRoutineDemo() {

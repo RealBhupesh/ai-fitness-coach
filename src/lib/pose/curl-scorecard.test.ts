@@ -93,6 +93,28 @@ describe("curl scorecards", () => {
     expect(scorecard.metrics.wristStack.status).toBe("unreliable");
   });
 
+  it("does not reorder replay frame evidence while selecting best phase", () => {
+    const frames = [
+      analyzeFrame(buildCurlLandmarks(166), 0, "bottom"),
+      analyzeFrame(buildCurlLandmarks(58), 900, "top"),
+      analyzeFrame(buildCurlLandmarks(166), 1800, "bottom"),
+    ];
+    frames[0].analysis.overall = 72;
+    frames[1].analysis.overall = 94;
+    frames[2].analysis.overall = 80;
+    const originalOrder = frames.map((frame) => frame.timestampMs);
+
+    const scorecard = buildCurlRepScorecard({
+      repNumber: 4,
+      durationMs: 1800,
+      coachingLevel: "normal",
+      frames,
+    });
+
+    expect(scorecard.bestPhase).toBe("top");
+    expect(frames.map((frame) => frame.timestampMs)).toEqual(originalOrder);
+  });
+
   it("builds baseline readiness from stable tracking frames", () => {
     let previous = null as Landmark[] | null;
     const frames = Array.from({ length: 12 }, (_, index) => {
