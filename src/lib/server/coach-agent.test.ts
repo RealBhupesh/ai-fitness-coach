@@ -8,6 +8,7 @@ function session(score: number, type = "strength") {
     type,
     exerciseType: type === "dance" ? "dance_basic" : "squat",
     date: new Date(),
+    duration: 20,
     caloriesBurned: 120,
     compositeScore: score,
     totalReps: 12,
@@ -100,5 +101,54 @@ describe("coach agent decision engine", () => {
     expect(plan.focusMetric.label).toBe("Knee tracking");
     expect(plan.todayPlan.secondaryAction).toMatch(/Review progress/i);
     expect(plan.todayPlan.evidenceChips).toContain("Squat Foundation: 84%");
+  });
+
+  it("low recovery check-ins reduce readiness and recommend recovery", async () => {
+    const { buildReadinessReport } = await import("@/lib/server/coach-agent");
+    const readiness = buildReadinessReport({
+      sessions: [session(78), session(74)],
+      sleepHours: 7,
+      recoveryCheckIn: {
+        sleepHours: 4.5,
+        sleepQuality: 2,
+        soreness: 5,
+        stress: 5,
+        energy: 1,
+        hydration: 2,
+      },
+      failedMetrics: ["Knee tracking", "Torso stack", "Depth"],
+    });
+
+    expect(readiness.score).toBeLessThan(55);
+    expect(readiness.label).toBe("Recover");
+    expect(readiness.recommendation).toMatch(/mobility|recovery/i);
+  });
+
+  it("converts recent sessions into strain and weekly adaptive plans", async () => {
+    const { buildStrainLoadReport, buildWeeklyAdaptivePlan } = await import("@/lib/server/coach-agent");
+    const strain = buildStrainLoadReport([session(88), session(84, "dance")]);
+    const plan = buildWeeklyAdaptivePlan({
+      readiness: {
+        score: 82,
+        label: "Ready",
+        recommendation: "Train normally.",
+        drivers: [],
+        recoveryDebt: 4,
+      },
+      strainLoad: strain,
+      decision: {
+        priority: "practice",
+        reason: "A repeated weak metric is limiting progress.",
+        evidence: [],
+        nextAction: "Repeat timing practice.",
+      },
+      focusMetric: { label: "Beat timing" },
+      closestAchievement: null,
+    });
+
+    expect(strain.todayStrain).toBeGreaterThan(0);
+    expect(strain.weeklyLoad).toBeGreaterThanOrEqual(strain.todayStrain);
+    expect(plan).toHaveLength(7);
+    expect(plan.some((day) => day.type === "dance")).toBe(true);
   });
 });

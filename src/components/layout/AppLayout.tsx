@@ -21,6 +21,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import {
   Activity,
+  BatteryCharging,
   Calendar,
   CircleGauge,
   Dumbbell,
@@ -48,6 +49,7 @@ const mainNavItems = [
   { href: "/workout-plans", label: "Plans", icon: Calendar },
   { href: "/nutrition", label: "Nutrition", icon: Utensils },
   { href: "/progress", label: "Progress", icon: TrendingUp },
+  { href: "/recovery", label: "Recovery", icon: BatteryCharging },
   { href: "/achievements", label: "Achievements", icon: Trophy },
 ];
 

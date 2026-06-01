@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { Activity, AlertCircle, Bot, Calendar, CheckCircle2, Clock, Dumbbell, Flame, MessageSquare, Music2, Play, Sparkles, Target, TrendingUp } from "lucide-react";
+import { Activity, AlertCircle, BatteryCharging, Bell, Bot, Calendar, CheckCircle2, Clock, Dumbbell, Flame, HeartPulse, LineChart, MessageSquare, Music2, Play, Sparkles, Target, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -82,6 +82,51 @@ type CoachAgentReport = {
     evidence: string[];
     planAdjustment: string;
   };
+  readiness: {
+    score: number;
+    label: string;
+    recommendation: string;
+    drivers: string[];
+    recoveryDebt: number;
+  };
+  strainLoad: {
+    todayStrain: number;
+    weeklyLoad: number;
+    label: string;
+    targetRange: string;
+    explanation: string;
+  };
+  weeklyAdaptivePlan: Array<{
+    day: string;
+    label: string;
+    type: string;
+    duration: number;
+    intensity: string;
+    reason: string;
+    href: string;
+  }>;
+  bodyBattery: Array<{
+    time: string;
+    energy: number;
+    label: string;
+  }>;
+  smartAlerts: Array<{
+    title: string;
+    message: string;
+    href: string;
+    severity: string;
+  }>;
+  trendInsights: Array<{
+    label: string;
+    value: string;
+    trend: string;
+    detail: string;
+  }>;
+  wearableIntegrations: Array<{
+    name: string;
+    status: string;
+    signal: string;
+  }>;
   achievementRecommendation: string;
 };
 
@@ -130,6 +175,9 @@ export default function DashboardPage() {
 
   const name = profile?.name?.split(" ")[0] || "Athlete";
   const firstTime = !loading && summary.totalWorkouts === 0;
+  const bodyBatteryAverage = agent?.bodyBattery?.length
+    ? Math.round(agent.bodyBattery.reduce((sum, item) => sum + item.energy, 0) / agent.bodyBattery.length)
+    : 0;
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-6 lg:p-8">
@@ -244,6 +292,157 @@ export default function DashboardPage() {
         </Card>
       )}
 
+      {agent ? (
+        <div className="grid gap-4 xl:grid-cols-[1.05fr_1.25fr_0.7fr]">
+          <Card className="overflow-hidden border-primary/20 bg-card/92">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <HeartPulse className="h-5 w-5 text-primary" />
+                Readiness
+              </CardTitle>
+              <CardDescription>Sleep, recovery debt, recent load, and weak metrics decide the day.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-end justify-between gap-4">
+                <div>
+                  <p className="text-6xl font-black leading-none text-primary">{agent.readiness.score}</p>
+                  <p className="mt-2 text-sm font-semibold uppercase text-muted-foreground">{agent.readiness.label}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm text-muted-foreground">Recovery debt</p>
+                  <p className="text-2xl font-black">{agent.readiness.recoveryDebt}</p>
+                </div>
+              </div>
+              <div className="mt-5 h-2 rounded-full bg-muted">
+                <div className="h-full rounded-full bg-primary" style={{ width: `${agent.readiness.score}%` }} />
+              </div>
+              <p className="mt-4 text-sm text-muted-foreground">{agent.readiness.recommendation}</p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {agent.readiness.drivers.slice(0, 4).map((driver) => (
+                  <Badge key={driver} variant="secondary">{driver}</Badge>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-accent/20 bg-card/92">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <LineChart className="h-5 w-5 text-accent" />
+                Strain + Body Battery
+              </CardTitle>
+              <CardDescription>WHOOP-style training load plus an energy curve for the day.</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-5 md:grid-cols-[0.8fr_1.2fr]">
+              <div className="rounded-lg border bg-background/45 p-4">
+                <div className="flex items-center justify-between">
+                  <Badge>{agent.strainLoad.label}</Badge>
+                  <span className="text-xs text-muted-foreground">{agent.strainLoad.targetRange}</span>
+                </div>
+                <p className="mt-4 text-5xl font-black leading-none">{agent.strainLoad.todayStrain}</p>
+                <p className="mt-1 text-sm text-muted-foreground">today strain</p>
+                <p className="mt-4 text-2xl font-black">{agent.strainLoad.weeklyLoad}</p>
+                <p className="text-sm text-muted-foreground">weekly load</p>
+                <p className="mt-4 text-xs text-muted-foreground">{agent.strainLoad.explanation}</p>
+              </div>
+              <div className="rounded-lg border bg-background/45 p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 font-medium">
+                    <BatteryCharging className="h-4 w-4 text-primary" />
+                    Body battery
+                  </div>
+                  <Badge variant="secondary">{bodyBatteryAverage}% avg</Badge>
+                </div>
+                <div className="mt-5 grid h-40 grid-cols-5 items-end gap-2">
+                  {agent.bodyBattery.map((point) => (
+                    <div key={point.time} className="flex h-full flex-col justify-end gap-2">
+                      <div className="rounded-t-md bg-primary/80" style={{ height: `${Math.max(12, point.energy)}%` }} />
+                      <div>
+                        <p className="text-[10px] font-semibold">{point.time}</p>
+                        <p className="truncate text-[10px] text-muted-foreground">{point.label}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-amber-400/20 bg-card/92">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Bell className="h-5 w-5 text-amber-300" />
+                Smart Alerts
+              </CardTitle>
+              <CardDescription>Small nudges that prevent drop-off.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {agent.smartAlerts.length ? agent.smartAlerts.map((alert) => (
+                <Link key={alert.title} href={alert.href} className="block rounded-lg border bg-background/45 p-3 transition hover:border-primary/50">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-medium">{alert.title}</p>
+                    <Badge variant={alert.severity === "warning" ? "destructive" : "secondary"}>{alert.severity}</Badge>
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">{alert.message}</p>
+                </Link>
+              )) : (
+                <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">No urgent alerts. Save a session or recovery check-in to refresh nudges.</div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
+
+      {agent ? (
+        <div className="grid gap-4 lg:grid-cols-[1.35fr_0.65fr]">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Calendar className="h-5 w-5 text-primary" />
+                Adaptive Week
+              </CardTitle>
+              <CardDescription>The coach reshapes this week from readiness, strain, achievements, and weak metrics.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-3 md:grid-cols-7">
+                {agent.weeklyAdaptivePlan.map((day) => (
+                  <Link key={`${day.day}-${day.label}`} href={day.href} className="rounded-lg border bg-background/45 p-3 transition hover:border-primary/50">
+                    <div className="flex items-center justify-between gap-2 md:block">
+                      <p className="text-xs font-black uppercase text-muted-foreground">{day.day}</p>
+                      <Badge className="mt-0 md:mt-2" variant="secondary">{day.duration}m</Badge>
+                    </div>
+                    <p className="mt-3 min-h-10 text-sm font-semibold leading-tight">{day.label}</p>
+                    <p className="mt-2 text-[11px] capitalize text-muted-foreground">{day.type} • {day.intensity}</p>
+                  </Link>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <TrendingUp className="h-5 w-5 text-accent" />
+                Performance Trends
+              </CardTitle>
+              <CardDescription>Signals that make the app feel like a health OS.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {agent.trendInsights.map((insight) => (
+                <div key={insight.label} className="rounded-lg border bg-background/45 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="font-medium">{insight.label}</p>
+                    <Badge variant="secondary">{insight.trend}</Badge>
+                  </div>
+                  <p className="mt-2 text-2xl font-black">{insight.value}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{insight.detail}</p>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
           { label: "Workout Streak", value: `${summary.streak} days`, icon: Flame },
@@ -290,8 +489,8 @@ export default function DashboardPage() {
             <div className="rounded-lg border bg-background/55 p-4">
               <p className="font-medium">Coach memory</p>
               <div className="mt-3 flex flex-wrap gap-2">
-                {[agent.memory.recommendedFocus, ...agent.memory.weakMetrics.slice(0, 3)].filter(Boolean).map((item) => (
-                  <Badge key={item} variant="secondary">{item}</Badge>
+                {[agent.memory.recommendedFocus, ...agent.memory.weakMetrics.slice(0, 3)].filter(Boolean).map((item, index) => (
+                  <Badge key={`${item}-${index}`} variant="secondary">{item}</Badge>
                 ))}
               </div>
               <p className="mt-3 text-sm text-muted-foreground">{agent.preSessionBrief.planAdjustment}</p>

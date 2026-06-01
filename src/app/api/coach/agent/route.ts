@@ -63,6 +63,50 @@ const DEMO_REPORT = {
     evidence: ["Priority: practice", "Knee tracking needs attention", "Dance timing needs attention"],
     planAdjustment: "Alternate fitness technique and hip-hop practice sessions.",
   },
+  readiness: {
+    score: 76,
+    label: "Ready",
+    recommendation: "Train normally and keep one focus metric in view.",
+    drivers: ["7.3h sleep signal", "energy 4/5", "12 recovery debt", "form limiter: Knee tracking"],
+    recoveryDebt: 12,
+  },
+  strainLoad: {
+    todayStrain: 7,
+    weeklyLoad: 38,
+    label: "Balanced",
+    targetRange: "25-50 this week",
+    explanation: "Training load is in a productive maintenance and skill-building zone.",
+  },
+  weeklyAdaptivePlan: [
+    { day: "Mon", label: "Squat technique", type: "workout", duration: 20, intensity: "moderate", href: "/coach/workout", reason: "Coach focus: Knee tracking." },
+    { day: "Tue", label: "Mobility reset", type: "mobility", duration: 15, intensity: "low", href: "/recovery", reason: "Keep joints fresh while preserving consistency." },
+    { day: "Wed", label: "Hip-hop timing", type: "dance", duration: 18, intensity: "moderate", href: "/coach/dance", reason: "Dance timing needs one clean phrase." },
+    { day: "Thu", label: "Base builder", type: "workout", duration: 22, intensity: "moderate", href: "/coach/workout", reason: "Hold the plan steady with one clear target." },
+    { day: "Fri", label: "Achievement chase", type: "workout", duration: 20, intensity: "moderate", href: "/coach/workout", reason: "Save 14 more squat scorecard reps." },
+    { day: "Sat", label: "Mobility reset", type: "mobility", duration: 15, intensity: "low", href: "/recovery", reason: "Protect recovery before the next session." },
+    { day: "Sun", label: "Progression session", type: "dance", duration: 24, intensity: "high", href: "/coach/dance", reason: "Blend fitness control with rhythm." },
+  ],
+  bodyBattery: [
+    { time: "06:00", energy: 84, label: "wake" },
+    { time: "09:00", energy: 80, label: "prime focus" },
+    { time: "12:00", energy: 73, label: "midday" },
+    { time: "16:00", energy: 65, label: "train window" },
+    { time: "20:00", energy: 52, label: "downshift" },
+  ],
+  smartAlerts: [
+    { title: "Squat Foundation is close", message: "Save 14 more squat scorecard reps.", href: "/achievements", severity: "success" },
+    { title: "Streak protection", message: "Ten focused minutes is enough to keep coach memory warm.", href: "/coach/workout", severity: "info" },
+  ],
+  trendInsights: [
+    { label: "Form trend", value: "82/100", trend: "up", detail: "Compared with prior sessions." },
+    { label: "Calorie burn", value: "140 avg", trend: "flat", detail: "Uses saved workout and dance calorie estimates." },
+    { label: "Modality balance", value: "3:2", trend: "flat", detail: "Strength to dance ratio across recent coach memory." },
+  ],
+  wearableIntegrations: [
+    { name: "Apple Health", status: "planned", signal: "sleep, steps, active energy" },
+    { name: "Google Fit", status: "planned", signal: "activity minutes, calories, heart points" },
+    { name: "Fitbit / WHOOP imports", status: "planned", signal: "recovery, HRV, resting heart rate" },
+  ],
   achievementRecommendation: "Squat Foundation: 25 scorecard reps to unlock.",
 };
 
