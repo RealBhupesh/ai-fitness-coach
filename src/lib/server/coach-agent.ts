@@ -2,7 +2,7 @@ import { desc, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/db";
 import { coachMemories, exerciseReps, workoutSessions } from "@/db/schema";
-import { ensureAchievements } from "@/lib/server/app-data";
+import { buildAchievementProgress, ensureAchievements } from "@/lib/server/app-data";
 import { parseJsonArray, parseJsonObject, toJson } from "@/lib/utils/json";
 
 export type CoachDecisionPriority = "recover" | "practice" | "progress" | "repeat" | "celebrate";
@@ -24,6 +24,27 @@ export type CoachAgentReport = {
     recommendedFocus: string;
     preferredNextAction: CoachDecisionPriority;
   };
+  todayPlan: {
+    title: string;
+    primaryAction: string;
+    primaryHref: string;
+    secondaryAction: string;
+    secondaryHref: string;
+    evidenceChips: string[];
+  };
+  primarySessionRecommendation: {
+    type: "workout" | "dance" | "recovery";
+    label: string;
+    href: string;
+    reason: string;
+  };
+  focusMetric: {
+    label: string;
+    target: string;
+    measuredValue: string;
+    cue: string;
+  };
+  closestAchievement: ClosestAchievement;
   preSessionBrief: CoachDecision;
   postSessionNextAction: CoachDecision;
   weeklyReport: {
@@ -33,6 +54,18 @@ export type CoachAgentReport = {
   };
   achievementRecommendation: string;
 };
+
+export type ClosestAchievement = {
+  name: string;
+  description: string;
+  category: string;
+  icon: string | null;
+  threshold: number;
+  progress: number;
+  remaining: number;
+  percent: number;
+  nextAction: string;
+} | null;
 
 type SessionLike = {
   id: string;
@@ -152,6 +185,127 @@ export function buildCoachDecision(input: {
   };
 }
 
+function actionForAchievement(achievement: { name: string; category: string; remaining: number }) {
+  const remaining = achievement.remaining;
+  if (achievement.name === "First Steps") return "Complete one coached workout or hip-hop dance session.";
+  if (achievement.name === "Week Warrior" || achievement.name === "Month Master") return `Train on ${remaining} more active day${remaining === 1 ? "" : "s"}.`;
+  if (achievement.name === "Calorie Crusher") return `Burn ${remaining} more calories in saved sessions.`;
+  if (achievement.name === "Rep Collector") return `Complete ${remaining} more counted live rep${remaining === 1 ? "" : "s"}.`;
+  if (achievement.name === "Form Scholar") return `Finish ${remaining} more session${remaining === 1 ? "" : "s"} with a score of 85 or higher.`;
+  if (achievement.name === "Curl Technician") return `Save ${remaining} more bicep curl scorecard rep${remaining === 1 ? "" : "s"}.`;
+  if (achievement.name === "Squat Foundation") return `Save ${remaining} more squat scorecard rep${remaining === 1 ? "" : "s"}.`;
+  if (achievement.name === "Hip-Hop Debut") return "Complete one hip-hop starter groove session.";
+  if (achievement.name === "Groove Builder" || achievement.category === "dance") return `Complete ${remaining} more dance session${remaining === 1 ? "" : "s"} with timing evidence.`;
+  if (achievement.category === "fitness") return `Complete ${remaining} more strength session${remaining === 1 ? "" : "s"}.`;
+  return `Make ${remaining} more progress point${remaining === 1 ? "" : "s"} toward this milestone.`;
+}
+
+export function chooseFocusMetric(input: { failedMetrics: string[]; decision: CoachDecision; latest?: SessionLike | null }) {
+  const label = input.failedMetrics[0] ?? (input.latest?.type === "dance" ? "Beat timing" : "Setup quality");
+  if (/timing|beat|groove/i.test(label)) {
+    return {
+      label,
+      target: "Arrive within the phrase window",
+      measuredValue: "Timing consistency from dance checkpoints",
+      cue: "Count the beat out loud for the first phrase, then move on the count instead of after it.",
+    };
+  }
+  if (/knee/i.test(label)) {
+    return {
+      label,
+      target: "Knees track over middle toes",
+      measuredValue: "Knee-tracking scorecard status",
+      cue: "Slow the descent and press both knees toward the middle toes.",
+    };
+  }
+  if (/elbow/i.test(label)) {
+    return {
+      label,
+      target: "Elbow stays beside the ribs",
+      measuredValue: "Elbow-path scorecard status",
+      cue: "Pin the elbow before the curl and keep the upper arm still.",
+    };
+  }
+  if (/torso|stability|stack/i.test(label)) {
+    return {
+      label,
+      target: "Torso remains stacked and quiet",
+      measuredValue: "Torso stability score",
+      cue: "Brace the ribs and move only through the working joints.",
+    };
+  }
+  return {
+    label,
+    target: "Reliable camera plus controlled movement",
+    measuredValue: input.decision.evidence.find((item) => /score|metric/i.test(item)) ?? "No measurement yet",
+    cue: "Move slower for the first minute so the coach can lock onto clean evidence.",
+  };
+}
+
+export function buildGuidedCoachPlan(input: {
+  decision: CoachDecision;
+  sessions: SessionLike[];
+  failedMetrics: string[];
+  closestAchievement: ClosestAchievement;
+}) {
+  const latest = input.sessions[0];
+  const recentDance = input.sessions.filter((session) => session.type === "dance").length;
+  const recentStrength = input.sessions.filter((session) => session.type === "strength").length;
+  const totalCalories = input.sessions.reduce((sum, session) => sum + (session.caloriesBurned ?? 0), 0);
+  const averageScore = input.sessions.length
+    ? Math.round(input.sessions.reduce((sum, session) => sum + (session.compositeScore ?? 0), 0) / input.sessions.length)
+    : 0;
+  const focusMetric = chooseFocusMetric({ failedMetrics: input.failedMetrics, decision: input.decision, latest });
+  const shouldDance = input.decision.priority === "progress" ? recentDance >= recentStrength : latest?.type === "dance" || /timing|dance|hip-hop/i.test(focusMetric.label);
+  const recommendation =
+    input.decision.priority === "recover"
+      ? {
+          type: "recovery" as const,
+          label: "Technique reset",
+          href: "/coach/workout",
+          reason: "Recent scores or failed metrics suggest lighter practice before progression.",
+        }
+      : shouldDance
+        ? {
+            type: "dance" as const,
+            label: "Hip-hop starter groove",
+            href: "/coach/dance",
+            reason: "Dance timing or recent dance evidence is the clearest next coaching signal.",
+          }
+        : {
+            type: "workout" as const,
+            label: focusMetric.label.toLowerCase().includes("elbow") ? "Bicep curl technique" : "Squat technique set",
+            href: "/coach/workout",
+            reason: "Fitness scorecards show this is the best place to improve form quality.",
+          };
+
+  const evidenceChips = [
+    `${input.sessions.length} sessions`,
+    `${totalCalories} calories`,
+    averageScore ? `avg score ${averageScore}` : "baseline needed",
+    input.failedMetrics[0] ? `weak: ${input.failedMetrics[0]}` : "",
+    input.closestAchievement ? `${input.closestAchievement.name}: ${input.closestAchievement.percent}%` : "",
+  ].filter(Boolean);
+
+  return {
+    focusMetric,
+    primarySessionRecommendation: recommendation,
+    todayPlan: {
+      title: input.sessions.length ? "Today's coach plan" : "Start your first coached baseline",
+      primaryAction: `Start ${recommendation.label}`,
+      primaryHref: recommendation.href,
+      secondaryAction:
+        input.decision.priority === "recover"
+          ? "Review progress"
+          : input.closestAchievement
+            ? `Chase ${input.closestAchievement.name}`
+            : "Ask coach",
+      secondaryHref: input.closestAchievement ? "/achievements" : "/coach/chat",
+      evidenceChips,
+    },
+  };
+}
+
 function weeklyReport(sessions: SessionLike[], decision: CoachDecision) {
   const calories = sessions.reduce((sum, session) => sum + (session.caloriesBurned ?? 0), 0);
   const reps = sessions.reduce((sum, session) => sum + (session.totalReps ?? 0), 0);
@@ -179,25 +333,35 @@ async function loadAgentEvidence(userId: string) {
   return { sessions, reps };
 }
 
-async function closestAchievement(userId: string) {
-  const { allAchievements, awards } = await ensureAchievements(userId);
+async function closestAchievement(userId: string): Promise<ClosestAchievement> {
+  const { allAchievements, awards, stats } = await ensureAchievements(userId);
   const awarded = new Set(awards.map((award) => award.achievementId));
+  const liveProgress = buildAchievementProgress(stats);
   const locked = allAchievements
     .filter((achievement) => !awarded.has(achievement.id) && achievement.threshold)
     .map((achievement) => {
-      const award = awards.find((item) => item.achievementId === achievement.id);
+      const progress = liveProgress[achievement.name] ?? 0;
+      const remaining = Math.max(0, (achievement.threshold ?? 0) - progress);
       return {
+        id: achievement.id,
         name: achievement.name,
-        remaining: Math.max(0, (achievement.threshold ?? 0) - (award?.progress ?? 0)),
+        description: achievement.description,
+        category: achievement.category,
+        icon: achievement.icon,
+        threshold: achievement.threshold ?? 0,
+        progress,
+        remaining,
+        percent: Math.min(100, Math.round((progress / Math.max(achievement.threshold ?? 1, 1)) * 100)),
       };
     })
     .sort((a, b) => a.remaining - b.remaining)[0];
-  return locked ? `${locked.name}: ${locked.remaining} more to unlock.` : "All tracked achievements are currently unlocked or waiting for more data.";
+  return locked ? { ...locked, nextAction: actionForAchievement(locked) } : null;
 }
 
 export async function updateCoachMemory(userId: string): Promise<CoachAgentReport> {
   const { sessions, reps } = await loadAgentEvidence(userId);
-  const achievementRecommendation = await closestAchievement(userId);
+  const closest = await closestAchievement(userId);
+  const achievementRecommendation = closest ? `${closest.name}: ${closest.remaining} more to unlock. ${closest.nextAction}` : "All tracked achievements are currently unlocked or waiting for more data.";
   const decision = buildCoachDecision({ recentSessions: sessions, reps, achievementRecommendation });
   const failedMetrics = topValues(reps.flatMap((rep) => scorecardLabels(rep, "fail")));
   const strongMetrics = topValues(reps.flatMap((rep) => scorecardLabels(rep, "pass")));
@@ -240,6 +404,8 @@ export async function updateCoachMemory(userId: string): Promise<CoachAgentRepor
 
   return {
     memory,
+    ...buildGuidedCoachPlan({ decision, sessions, failedMetrics, closestAchievement: closest }),
+    closestAchievement: closest,
     preSessionBrief: {
       ...decision,
       nextAction: `Before starting: ${decision.nextAction}`,

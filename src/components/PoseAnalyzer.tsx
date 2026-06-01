@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { createCameraController, getCameraProfile } from "@/lib/camera/controller";
+import { buildUnreliableCameraGuidance } from "@/lib/camera/guidance";
 import { compareDanceFrame } from "@/lib/dance/comparator";
 import type { DanceComparison, DanceRoutinePack } from "@/lib/dance/types";
 import { selectFeedbackCue } from "@/lib/feedback/cues";
@@ -74,6 +75,46 @@ type CorrectiveBlock = {
   minuteRange: string;
   drill: string;
   focusCue: string;
+};
+
+type CoachAgentReport = {
+  primarySessionRecommendation?: {
+    type: "workout" | "dance" | "recovery";
+    label: string;
+    href: string;
+    reason: string;
+  };
+  focusMetric?: {
+    label: string;
+    target: string;
+    measuredValue: string;
+    cue: string;
+  };
+  preSessionBrief?: {
+    priority: string;
+    reason: string;
+    evidence: string[];
+    nextAction: string;
+    planAdjustment?: string;
+  };
+  postSessionNextAction?: {
+    priority: string;
+    reason: string;
+    evidence: string[];
+    nextAction: string;
+    planAdjustment?: string;
+    achievementRecommendation?: string;
+  };
+  closestAchievement?: {
+    name: string;
+    description: string;
+    icon: string | null;
+    progress: number;
+    threshold: number;
+    remaining: number;
+    percent: number;
+    nextAction: string;
+  } | null;
 };
 
 async function parseApiResponse(response: Response) {
@@ -824,6 +865,8 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   const [summaryInsights, setSummaryInsights] = useState<string[]>([]);
   const [summaryPractice, setSummaryPractice] = useState<string[]>([]);
   const [techniqueScorecard, setTechniqueScorecard] = useState<TechniqueScorecard | null>(null);
+  const [agentReport, setAgentReport] = useState<CoachAgentReport | null>(null);
+  const [postSessionAgent, setPostSessionAgent] = useState<CoachAgentReport | null>(null);
   const [danceRoutine, setDanceRoutine] = useState<DanceRoutinePack | null>(null);
   const [danceComparison, setDanceComparison] = useState<DanceComparison | null>(null);
   const [danceSegmentBreakdown, setDanceSegmentBreakdown] = useState<Array<{ id: string; label: string; overall: number; timing: number; transition: number }>>([]);
@@ -906,6 +949,24 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       ]
     };
   }, [sparkPosition]);
+
+  useEffect(() => {
+    let active = true;
+    const loadAgent = async () => {
+      try {
+        const response = await fetch("/api/coach/agent", { credentials: "include" });
+        if (!response.ok) return;
+        const data = await response.json();
+        if (active) setAgentReport(data);
+      } catch {
+        if (active) setAgentReport(null);
+      }
+    };
+    void loadAgent();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const runDrawLoop = (landmarks: Landmark[] | null, score: number, exerciseId: ExerciseId, analysis?: FrameAnalysis) => {
     if (hudMode === "3d") {
@@ -1554,6 +1615,10 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       });
       const data = await parseApiResponse(response);
       if (!response.ok) throw new Error(data?.error || "Failed to save session");
+      if (data?.coachAgent) {
+        setPostSessionAgent(data.coachAgent);
+        setAgentReport(data.coachAgent);
+      }
 
       const topIssues = Array.from(new Set(eventsRef.current.filter((event) => event.severity !== "info").map((event) => event.message))).slice(0, 6);
       const topStrengths = framesRef.current.length ? [scoring.form >= 80 ? "Form quality stayed strong for most reps." : "", scoring.rom >= 80 ? "Range of motion was consistent." : "", scoring.safety >= 85 ? "Movement stayed safe and controlled." : ""].filter(Boolean) : [];
@@ -1672,6 +1737,57 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       window.localStorage.setItem(CURL_MEMORY_KEY, JSON.stringify(nextMemory));
     } catch {}
     toast.success("Teacher demo loaded");
+  };
+
+  const activateDemoFallback = () => {
+    if (mode === "workout") {
+      loadCurlTeacherDemo();
+      setPostSessionAgent(agentReport);
+      toast.success("Demo fallback loaded");
+      return;
+    }
+    stopCamera();
+    reset();
+    setExerciseId("dance_basic");
+    exerciseIdRef.current = "dance_basic";
+    const demoSegment = danceRoutine?.segments[0] ?? {
+      id: "demo-phrase",
+      label: "Starter phrase",
+      startMs: 0,
+      endMs: 8000,
+      cue: "Starter groove",
+      focus: "timing",
+      targetMetrics: { frameWidth: [0.35, 0.75] as [number, number], armLift: [0.2, 0.8] as [number, number], torsoLeanMax: 18, kneeAngle: [115, 165] as [number, number], symmetryMax: 0.22 },
+      targetLandmarks: {},
+    };
+    setDanceComparison({
+      segment: demoSegment,
+      poseSimilarity: 78,
+      timingScore: 72,
+      segmentCompletion: 84,
+      transitionQuality: 75,
+      reliability: 88,
+      overall: 75,
+      failedMetrics: ["Beat timing"],
+      primaryIssue: "Late shoulder hit",
+      notes: ["Land the shoulder hit slightly earlier on count two."],
+      metrics: {
+        poseShape: { key: "poseShape", label: "Hip-hop shape", score: 78, status: "warning", reliable: true, detail: "Arms match the phrase shape with small timing drift.", target: "Clear hit on counts 2 and 4" },
+        grooveBounce: { key: "grooveBounce", label: "Groove bounce", score: 74, status: "warning", reliable: true, detail: "Bounce is present but uneven between counts.", target: "Even down-up pulse" },
+        armHits: { key: "armHits", label: "Arm hits", score: 76, status: "warning", reliable: true, detail: "Hits are readable but need sharper stops.", target: "Stop cleanly on accented counts" },
+        torsoControl: { key: "torsoControl", label: "Torso control", score: 82, status: "pass", reliable: true, detail: "Torso stays stable through the groove.", target: "Stable chest line" },
+        timing: { key: "timing", label: "Beat timing", score: 72, status: "warning", reliable: true, detail: "You are slightly late on the transition.", target: "Arrive inside phrase window" },
+        transition: { key: "transition", label: "Transition quality", score: 75, status: "warning", reliable: true, detail: "Step change is readable but could be cleaner.", target: "Clean weight shift before next hit" },
+      },
+    });
+    setDanceSegmentBreakdown([{ id: "demo-phrase", label: "Starter phrase", overall: 75, timing: 72, transition: 75 }]);
+    setSummary("Demo hip-hop fallback loaded with realistic phrase timing, groove bounce, and transition evidence.");
+    setSummaryInsights(["Shape was readable, but timing drifted late on the main shoulder hit.", "Reliability was high enough for review, but this was demo evidence."]);
+    setSummaryPractice(["Repeat the starter groove and count out loud through the first phrase."]);
+    setTopMistakes([{ mistake: "Late shoulder hit", whyItHurtsPerformance: "The phrase looks behind the beat when the hit lands after count two.", exactFix: "Count one-and-two, then hit the shoulder exactly on two before changing weight." }]);
+    setCorrectivePlan([{ minuteRange: "0:00-2:00", drill: "Counted shoulder hits", focusCue: "Say the count and hit on two." }, { minuteRange: "2:00-5:00", drill: "Starter groove loop", focusCue: "Keep bounce even while changing weight." }]);
+    setPostSessionAgent(agentReport);
+    toast.success("Dance demo fallback loaded");
   };
 
   useEffect(() => {
@@ -1974,6 +2090,49 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   const squatEvidence = useMemo(() => (exerciseId === "squat" ? summarizeSquatEvidence(squatRepScorecards) : null), [squatRepScorecards, exerciseId]);
   const curlFocus = useMemo(() => buildCurlFocus(curlRepScorecards, curlCoachMemory), [curlCoachMemory, curlRepScorecards]);
   const teacherReport = useMemo(() => buildTeacherReport(curlEvidence, curlCoachMemory), [curlCoachMemory, curlEvidence]);
+  const unreliableCameraGuidance = useMemo(() => buildUnreliableCameraGuidance(confidence), [confidence]);
+  const sessionFocusMetric = useMemo(() => {
+    if (mode === "dance") {
+      return {
+        label: "Hip-hop phrase timing",
+        target: "Hit the count inside the phrase window",
+        measuredValue: "Beat timing and transition score",
+        cue: "Count the starter groove out loud and land the arm hit on the beat.",
+      };
+    }
+    return agentReport?.focusMetric;
+  }, [agentReport?.focusMetric, mode]);
+  const livePrimaryMetric = useMemo(() => {
+    const metric = analysis.metrics[0];
+    if (metric) {
+      return {
+        label: metric.name,
+        measured: metric.value != null ? `${Math.round(metric.value)}` : `${metric.score}/100`,
+        target: metric.target ?? "Stay in the safe target range",
+      };
+    }
+    if (danceComparison) {
+      return {
+        label: "Beat timing",
+        measured: `${danceComparison.timingScore}/100`,
+        target: "Arrive inside the phrase window",
+      };
+    }
+    return {
+      label: sessionFocusMetric?.label ?? "Setup quality",
+      measured: `${qualityPercent}% tracking`,
+      target: sessionFocusMetric?.target ?? "Reliable tracking before scoring",
+    };
+  }, [analysis.metrics, danceComparison, qualityPercent, sessionFocusMetric?.label, sessionFocusMetric?.target]);
+  const preSessionWhy = useMemo(() => {
+    const recommendedType = agentReport?.primarySessionRecommendation?.type;
+    if (recommendedType && recommendedType !== "recovery" && recommendedType !== mode) {
+      return mode === "dance"
+        ? "You selected dance. The coach will still use your strongest available memory, then save hip-hop timing evidence after this session."
+        : "You selected workout. The coach will still use your strongest available memory, then save scorecard evidence after this session.";
+    }
+    return agentReport?.primarySessionRecommendation?.reason ?? agentReport?.preSessionBrief?.reason;
+  }, [agentReport, mode]);
   const setupSteps = useMemo(
     () => [
       { label: "Camera active", ready: cameraOn, detail: cameraOn ? cameraProfileLabel : "Enable laptop webcam" },
@@ -2065,7 +2224,8 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
 
       {trackingPausedReason ? (
         <div className="pointer-events-none absolute inset-x-4 top-16 rounded-2xl border border-amber-500/40 bg-zinc-950/85 p-3 text-sm text-amber-100">
-          {trackingPausedReason}
+          <p className="font-medium">{unreliableCameraGuidance?.title ?? "Tracking paused"}</p>
+          <p className="mt-1">{unreliableCameraGuidance?.message ?? trackingPausedReason}</p>
         </div>
       ) : null}
 
@@ -2079,8 +2239,16 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
             description={exerciseDescription}
             calibration={exercise.calibration}
             confidenceMessage={calibrationMessage}
+            whyThisSession={preSessionWhy}
+            focusMetric={sessionFocusMetric}
+            cameraState={{
+              quality: confidence.frameQuality,
+              readiness: qualityPercent,
+              canUseDemoFallback: cameraOn && !calibrationReady && qualityPercent < 55,
+            }}
             onEnableCamera={startCamera}
             onStartSession={startSession}
+            onDemoFallback={activateDemoFallback}
           />
         </div>
       ) : null}
@@ -2098,6 +2266,14 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
           <div className="flex items-center gap-2 rounded-full bg-zinc-900 px-3 py-1.5">
             <Waves className="h-4 w-4 text-fuchsia-300" />
             <span>{calories} kcal</span>
+          </div>
+          <div className="flex items-center gap-2 rounded-full bg-zinc-900 px-3 py-1.5">
+            <Target className="h-4 w-4 text-emerald-300" />
+            <span>Score {analysis.overall}</span>
+          </div>
+          <div className="flex items-center gap-2 rounded-full bg-zinc-900 px-3 py-1.5">
+            <CheckCircle2 className="h-4 w-4 text-cyan-300" />
+            <span>{qualityPercent}% reliable</span>
           </div>
           <div className="ml-auto flex flex-wrap gap-2">
             <Button size="sm" variant="outline" className="border-zinc-700 bg-zinc-900 text-zinc-100" onClick={() => setMirror((value) => !value)}>
@@ -2232,8 +2408,25 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className={cn("rounded-2xl border p-4", analysis.injuryRisks.length ? "border-rose-500/40 bg-rose-500/10" : analysis.corrections.length ? "border-amber-500/40 bg-amber-500/10" : "border-emerald-500/30 bg-emerald-500/10")}>
-                  <p className="text-lg font-semibold">{feedback}</p>
-                  {secondaryFeedback ? <p className="mt-2 text-sm text-zinc-300">{secondaryFeedback}</p> : null}
+                  <p className="text-lg font-semibold">{unreliableCameraGuidance ? unreliableCameraGuidance.title : feedback}</p>
+                  <p className="mt-2 text-sm text-zinc-300">{unreliableCameraGuidance ? unreliableCameraGuidance.message : secondaryFeedback}</p>
+                </div>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                    <p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Primary correction</p>
+                    <p className="mt-2 text-sm text-zinc-200">
+                      {unreliableCameraGuidance ? "Fix camera reliability first." : analysis.corrections[0] ?? danceComparison?.primaryIssue ?? sessionFocusMetric?.cue ?? "Hold steady and keep the rhythm controlled."}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                    <p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Measured value</p>
+                    <p className="mt-2 text-sm font-medium text-zinc-100">{livePrimaryMetric.label}</p>
+                    <p className="mt-1 text-sm text-zinc-300">{livePrimaryMetric.measured}</p>
+                  </div>
+                  <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+                    <p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Target range</p>
+                    <p className="mt-2 text-sm text-zinc-200">{livePrimaryMetric.target}</p>
+                  </div>
                 </div>
                 <div className="grid gap-3 md:grid-cols-2">
                   <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
@@ -2242,7 +2435,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                   </div>
                   <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
                     <p className="text-xs uppercase tracking-[0.24em] text-zinc-500">Fix now</p>
-                    <p className="mt-2 text-sm text-zinc-200">{analysis.corrections[0] ?? analysis.targetCue ?? "No immediate correction. Stay consistent."}</p>
+                    <p className="mt-2 text-sm text-zinc-200">{unreliableCameraGuidance ? unreliableCameraGuidance.reason : analysis.corrections[0] ?? analysis.targetCue ?? "No immediate correction. Stay consistent."}</p>
                   </div>
                 </div>
                 {exerciseId === "bicep_curl" ? (
@@ -2695,6 +2888,78 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {summary ? <p className="text-sm leading-6 text-zinc-200">{summary}</p> : null}
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/10 p-4">
+                      <p className="text-xs uppercase tracking-[0.24em] text-emerald-200/70">What improved</p>
+                      <p className="mt-2 text-sm text-zinc-200">
+                        {summaryInsights[0] ?? (analysis.positives[0] || "The session is saved, so the coach has stronger evidence for the next recommendation.")}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl border border-rose-500/25 bg-rose-500/10 p-4">
+                      <p className="text-xs uppercase tracking-[0.24em] text-rose-200/70">What failed most</p>
+                      <p className="mt-2 text-sm text-zinc-200">
+                        {topMistakes[0]?.mistake ?? summaryPractice[0] ?? sessionFocusMetric?.label ?? "No repeated failed metric was detected."}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl border border-cyan-500/25 bg-cyan-500/10 p-4">
+                      <p className="text-xs uppercase tracking-[0.24em] text-cyan-200/70">Next action</p>
+                      <p className="mt-2 text-sm text-zinc-200">
+                        {postSessionAgent?.postSessionNextAction?.nextAction ?? agentReport?.postSessionNextAction?.nextAction ?? summaryPractice[0] ?? "Repeat this module once more with one correction focus."}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 p-4">
+                      <p className="text-xs uppercase tracking-[0.24em] text-amber-200/70">Achievement progress</p>
+                      <p className="mt-2 text-sm text-zinc-200">
+                        {(postSessionAgent?.closestAchievement ?? agentReport?.closestAchievement)
+                          ? `${(postSessionAgent?.closestAchievement ?? agentReport?.closestAchievement)?.name}: ${(postSessionAgent?.closestAchievement ?? agentReport?.closestAchievement)?.progress}/${(postSessionAgent?.closestAchievement ?? agentReport?.closestAchievement)?.threshold}. ${(postSessionAgent?.closestAchievement ?? agentReport?.closestAchievement)?.nextAction}`
+                          : "Complete more sessions to open the next achievement chase."}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="outline" className="border-zinc-700 bg-zinc-900 text-zinc-100" onClick={() => {
+                      reset();
+                      setSummary("");
+                      setSummaryInsights([]);
+                      setSummaryPractice([]);
+                      setTopMistakes([]);
+                      setCorrectivePlan([]);
+                    }}>
+                      <RotateCcw className="h-4 w-4" />
+                      Repeat session
+                    </Button>
+                    <Button size="sm" className="bg-cyan-500 text-white hover:bg-cyan-600" onClick={() => {
+                      window.location.href = (postSessionAgent?.primarySessionRecommendation ?? agentReport?.primarySessionRecommendation)?.href ?? (mode === "dance" ? "/coach/dance" : "/coach/workout");
+                    }}>
+                      <Target className="h-4 w-4" />
+                      Recommended next
+                    </Button>
+                    <Button size="sm" variant="outline" className="border-zinc-700 bg-zinc-900 text-zinc-100" onClick={() => {
+                      window.location.href = "/coach/chat";
+                    }}>
+                      <Brain className="h-4 w-4" />
+                      Ask coach
+                    </Button>
+                    <Button size="sm" variant="outline" className="border-zinc-700 bg-zinc-900 text-zinc-100" onClick={async () => {
+                      const achievement = postSessionAgent?.closestAchievement ?? agentReport?.closestAchievement;
+                      const report = [
+                        summary,
+                        `Improved: ${summaryInsights[0] ?? analysis.positives[0] ?? "session evidence saved"}`,
+                        `Failed most: ${topMistakes[0]?.mistake ?? sessionFocusMetric?.label ?? "none"}`,
+                        `Next: ${postSessionAgent?.postSessionNextAction?.nextAction ?? agentReport?.postSessionNextAction?.nextAction ?? summaryPractice[0] ?? "repeat session"}`,
+                        achievement ? `Achievement: ${achievement.name} ${achievement.progress}/${achievement.threshold}. ${achievement.nextAction}` : "",
+                      ].filter(Boolean).join("\n");
+                      try {
+                        await navigator.clipboard.writeText(report);
+                        toast.success("Report copied");
+                      } catch {
+                        toast.error("Could not copy report");
+                      }
+                    }}>
+                      <Clipboard className="h-4 w-4" />
+                      Copy report
+                    </Button>
+                  </div>
                   {exerciseId === "bicep_curl" && curlEvidence?.totalReps ? (
                     <div className="rounded-2xl border border-cyan-500/25 bg-cyan-500/10 p-4">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

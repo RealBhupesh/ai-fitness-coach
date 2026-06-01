@@ -66,4 +66,39 @@ describe("coach agent decision engine", () => {
     expect(decision.priority).toBe("progress");
     expect(decision.planAdjustment).toMatch(/increase/i);
   });
+
+  it("builds a guided recovery plan with a focused weak metric", async () => {
+    const { buildCoachDecision, buildGuidedCoachPlan } = await import("@/lib/server/coach-agent");
+    const recentSessions = [session(52), session(58)];
+    const decision = buildCoachDecision({
+      recentSessions,
+      reps: [
+        { squatScorecard: repScorecard("Knee tracking", "fail") },
+        { squatScorecard: repScorecard("Knee tracking", "fail") },
+        { squatScorecard: repScorecard("Torso stack", "fail") },
+      ],
+      achievementRecommendation: "Squat Foundation: 4 more to unlock.",
+    });
+    const plan = buildGuidedCoachPlan({
+      decision,
+      sessions: recentSessions,
+      failedMetrics: ["Knee tracking", "Torso stack"],
+      closestAchievement: {
+        name: "Squat Foundation",
+        description: "Save 25 squat reps with scorecard evidence",
+        category: "fitness",
+        icon: "🦵",
+        threshold: 25,
+        progress: 21,
+        remaining: 4,
+        percent: 84,
+        nextAction: "Save 4 more squat scorecard reps.",
+      },
+    });
+
+    expect(plan.primarySessionRecommendation.type).toBe("recovery");
+    expect(plan.focusMetric.label).toBe("Knee tracking");
+    expect(plan.todayPlan.secondaryAction).toMatch(/Review progress/i);
+    expect(plan.todayPlan.evidenceChips).toContain("Squat Foundation: 84%");
+  });
 });

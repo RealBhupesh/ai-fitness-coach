@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { motion } from "framer-motion";
 import { Trophy, Lock, Sparkles, Crown, Calendar, Target, Flame, Dumbbell, Music2, Repeat2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -37,6 +39,11 @@ type AchievementStats = {
   weeklySessionPeak: number;
 };
 
+type ClosestAchievementRecord = AchievementRecord & {
+  remaining: number;
+  percent: number;
+};
+
 const rarityByPoints = (points: number) => {
   if (points >= 500) return "legendary";
   if (points >= 250) return "epic";
@@ -54,6 +61,7 @@ const rarityStyles = {
 export default function AchievementsPage() {
   const [category, setCategory] = useState("all");
   const [achievements, setAchievements] = useState<AchievementRecord[]>([]);
+  const [closestAchievement, setClosestAchievement] = useState<ClosestAchievementRecord | null>(null);
   const [stats, setStats] = useState<AchievementStats | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -67,11 +75,13 @@ export default function AchievementsPage() {
         if (!response.ok) throw new Error(data.error || "Failed to load achievements");
         if (active) {
           setAchievements(data.achievements ?? []);
+          setClosestAchievement(data.closestAchievement ?? null);
           setStats(data.stats ?? null);
         }
       } catch {
         if (active) {
           setAchievements([]);
+          setClosestAchievement(null);
           setStats(null);
         }
       } finally {
@@ -103,6 +113,17 @@ export default function AchievementsPage() {
     { label: "Strength", value: stats?.strengthSessionsCount ?? 0, icon: Dumbbell, tone: "text-emerald-500" },
     { label: "Dance", value: stats?.danceSessionsCount ?? 0, icon: Music2, tone: "text-fuchsia-500" },
   ];
+  const closestAction = closestAchievement
+    ? closestAchievement.name === "First Steps"
+      ? "Complete one coached workout or hip-hop dance session."
+      : closestAchievement.category === "dance"
+        ? `Complete ${closestAchievement.remaining} more dance evidence session${closestAchievement.remaining === 1 ? "" : "s"}.`
+        : closestAchievement.category === "calories"
+          ? `Burn ${closestAchievement.remaining} more calories in saved sessions.`
+          : closestAchievement.category === "fitness"
+            ? `Make ${closestAchievement.remaining} more scorecard or rep progress point${closestAchievement.remaining === 1 ? "" : "s"}.`
+            : `Add ${closestAchievement.remaining} more progress point${closestAchievement.remaining === 1 ? "" : "s"}.`
+    : "";
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-6 lg:p-8">
@@ -144,6 +165,45 @@ export default function AchievementsPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card className="border-cyan-500/20 bg-gradient-to-br from-cyan-500/10 to-emerald-500/10">
+        <CardContent className="grid gap-4 pt-6 md:grid-cols-[1fr_auto] md:items-center">
+          {closestAchievement ? (
+            <>
+              <div className="flex items-start gap-4">
+                <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-background text-3xl shadow-sm">{closestAchievement.icon}</div>
+                <div>
+                  <Badge className="mb-2 bg-cyan-500/15 text-cyan-700 dark:text-cyan-200">Closest achievement</Badge>
+                  <h2 className="text-xl font-semibold">{closestAchievement.name}</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">{closestAchievement.description}</p>
+                  <p className="mt-2 text-sm font-medium">{closestAction}</p>
+                  <div className="mt-3 max-w-md">
+                    <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
+                      <span>{closestAchievement.progress} / {closestAchievement.threshold}</span>
+                      <span>{closestAchievement.percent}%</span>
+                    </div>
+                    <Progress value={closestAchievement.percent} />
+                  </div>
+                </div>
+              </div>
+              <Link href={closestAchievement.category === "dance" ? "/coach/dance" : "/coach/workout"}>
+                <Button className="w-full gap-2 md:w-auto">
+                  <Target className="h-4 w-4" />
+                  Work on this
+                </Button>
+              </Link>
+            </>
+          ) : (
+            <div className="flex items-start gap-3">
+              <Trophy className="mt-0.5 h-5 w-5 text-amber-500" />
+              <div>
+                <p className="font-medium">No achievement chase yet</p>
+                <p className="text-sm text-muted-foreground">Complete a session and this area will show the exact next unlock action.</p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 md:grid-cols-4">
         {statCards.map((item) => {
@@ -212,7 +272,7 @@ export default function AchievementsPage() {
                   </CardContent>
                 </Card>
               ))
-            : visibleUnlocked.map((achievement) => {
+            : visibleUnlocked.length ? visibleUnlocked.map((achievement) => {
                 const rarity = rarityByPoints(achievement.points);
                 return (
                   <Card key={achievement.id} className={`overflow-hidden border ${rarityStyles[rarity].border}`}>
@@ -247,7 +307,13 @@ export default function AchievementsPage() {
                     </CardContent>
                   </Card>
                 );
-              })}
+              }) : (
+                <Card className="md:col-span-2 xl:col-span-3">
+                  <CardContent className="pt-6 text-sm text-muted-foreground">
+                    No achievements unlocked yet. Finish a guided session to unlock First Steps.
+                  </CardContent>
+                </Card>
+              )}
         </div>
       </section>
 
@@ -267,7 +333,7 @@ export default function AchievementsPage() {
                   </CardContent>
                 </Card>
               ))
-            : visibleLocked.map((achievement) => (
+            : visibleLocked.length ? visibleLocked.map((achievement) => (
                 <Card key={achievement.id} className="overflow-hidden">
                   <div className="h-1 bg-muted" />
                   <CardContent className="pt-5">
@@ -301,7 +367,13 @@ export default function AchievementsPage() {
                     </div>
                   </CardContent>
                 </Card>
-              ))}
+              )) : (
+                <Card className="md:col-span-2 xl:col-span-3">
+                  <CardContent className="pt-6 text-sm text-muted-foreground">
+                    No locked achievements found. New goals will appear as more session evidence is saved.
+                  </CardContent>
+                </Card>
+              )}
         </div>
       </section>
     </div>

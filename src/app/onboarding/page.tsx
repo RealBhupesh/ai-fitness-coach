@@ -26,6 +26,10 @@ import {
   Fish,
   Beef,
   Pizza,
+  Clock,
+  Music2,
+  Shield,
+  Timer,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -35,6 +39,7 @@ const steps = [
   { id: "body", title: "Body Stats", icon: Scale },
   { id: "goals", title: "Goals", icon: Target },
   { id: "experience", title: "Experience", icon: Dumbbell },
+  { id: "calibration", title: "Coach", icon: Brain },
   { id: "diet", title: "Diet", icon: Utensils },
   { id: "complete", title: "Complete", icon: Check },
 ];
@@ -62,6 +67,14 @@ const experienceLevels: { value: ExperienceLevel; label: string; description: st
   { value: "advanced", label: "Advanced", description: "3+ years with solid technique" },
 ];
 
+const equipmentOptions = ["Bodyweight", "Dumbbells", "Resistance band", "Yoga mat", "Chair/bench", "Open floor"];
+const scheduleOptions = [
+  { days: 3, label: "3 days/week", detail: "Steady and realistic" },
+  { days: 4, label: "4 days/week", detail: "Balanced progress" },
+  { days: 5, label: "5 days/week", detail: "Aggressive routine" },
+];
+const durationOptions = [15, 25, 35, 45];
+
 export default function OnboardingPage() {
   const router = useRouter();
   const { updateProfile, profile, session, loading } = useUserProfile();
@@ -78,6 +91,13 @@ export default function OnboardingPage() {
   const [targetWeight, setTargetWeight] = useState("");
   const [goals, setGoals] = useState<Goal[]>([]);
   const [experience, setExperience] = useState<ExperienceLevel>("beginner");
+  const [workoutFrequency, setWorkoutFrequency] = useState(4);
+  const [workoutDuration, setWorkoutDuration] = useState(25);
+  const [equipmentAccess, setEquipmentAccess] = useState<string[]>(["Bodyweight", "Open floor"]);
+  const [injuries, setInjuries] = useState("");
+  const [painPoints, setPainPoints] = useState("");
+  const [coachingTone, setCoachingTone] = useState<"friendly" | "strict" | "motivational">("friendly");
+  const [danceInterest, setDanceInterest] = useState(true);
   const [dietaryPrefs, setDietaryPrefs] = useState<DietaryPref[]>([]);
   const [allergies, setAllergies] = useState("");
 
@@ -99,6 +119,10 @@ export default function OnboardingPage() {
     );
   };
 
+  const toggleEquipment = (item: string) => {
+    setEquipmentAccess((prev) => (prev.includes(item) ? prev.filter((value) => value !== item) : [...prev, item]));
+  };
+
   const canProceed = () => {
     switch (steps[currentStep].id) {
       case "welcome":
@@ -111,6 +135,8 @@ export default function OnboardingPage() {
         return goals.length > 0;
       case "experience":
         return true;
+      case "calibration":
+        return workoutFrequency > 0 && workoutDuration > 0 && equipmentAccess.length > 0;
       case "diet":
         return true; // Optional
       case "complete":
@@ -148,6 +174,7 @@ export default function OnboardingPage() {
     setSaving(true);
     setSaveError(null);
     try {
+      const finalGoals = danceInterest && !goals.includes("dance_skill") ? [...goals, "dance_skill" as Goal] : goals;
       await updateProfile({
         name: name.trim(),
         age: age ? Number(age) : undefined,
@@ -156,8 +183,14 @@ export default function OnboardingPage() {
         weightKg: weightKg ? Number(weightKg) : undefined,
         targetWeightKg: targetWeight ? Number(targetWeight) : undefined,
         experience,
-        goals,
+        goals: finalGoals,
         dietaryPrefs,
+        injuries: injuries.split(",").map((item) => item.trim()).filter(Boolean),
+        painPoints: painPoints.split(",").map((item) => item.trim()).filter(Boolean),
+        equipmentAccess,
+        workoutFrequency,
+        workoutDuration,
+        coachingTone,
         allergies: allergies || undefined,
         onboardingCompleted: true,
       });
@@ -172,10 +205,7 @@ export default function OnboardingPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
-      <div className="absolute inset-0 -z-10">
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-gradient-to-br from-orange-500/10 to-rose-500/10 rounded-full blur-3xl" />
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-gradient-to-br from-violet-500/10 to-purple-500/10 rounded-full blur-3xl" />
-      </div>
+      <div className="absolute inset-0 -z-10 bg-[linear-gradient(180deg,_hsl(var(--background)),_hsl(var(--muted)))]" />
 
       <Card className="w-full max-w-2xl shadow-2xl border-0 bg-card/80 backdrop-blur-xl">
         <CardHeader className="pb-2">
@@ -422,6 +452,103 @@ export default function OnboardingPage() {
                 </div>
               )}
 
+              {/* Coach Calibration Step */}
+              {steps[currentStep].id === "calibration" && (
+                <div className="space-y-6">
+                  <div className="text-center mb-8">
+                    <h2 className="text-2xl font-bold">Calibrate your coach</h2>
+                    <p className="text-muted-foreground">This decides how the app guides your first week.</p>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="rounded-xl border p-4">
+                      <div className="flex items-center gap-2 font-medium">
+                        <Clock className="h-4 w-4 text-primary" />
+                        Weekly schedule
+                      </div>
+                      <div className="mt-3 grid gap-2">
+                        {scheduleOptions.map((option) => (
+                          <Button key={option.days} type="button" variant={workoutFrequency === option.days ? "default" : "outline"} className="h-auto justify-start py-3" onClick={() => setWorkoutFrequency(option.days)}>
+                            <span className="text-left">
+                              <span className="block">{option.label}</span>
+                              <span className="block text-xs opacity-75">{option.detail}</span>
+                            </span>
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border p-4">
+                      <div className="flex items-center gap-2 font-medium">
+                        <Timer className="h-4 w-4 text-primary" />
+                        Session length
+                      </div>
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        {durationOptions.map((duration) => (
+                          <Button key={duration} type="button" variant={workoutDuration === duration ? "default" : "outline"} onClick={() => setWorkoutDuration(duration)}>
+                            {duration} min
+                          </Button>
+                        ))}
+                      </div>
+                      <div className="mt-4 flex items-center justify-between rounded-lg border px-3 py-2">
+                        <span className="flex items-center gap-2 text-sm">
+                          <Music2 className="h-4 w-4 text-fuchsia-500" />
+                          Include hip-hop practice
+                        </span>
+                        <Button type="button" size="sm" variant={danceInterest ? "default" : "outline"} onClick={() => {
+                          setDanceInterest((value) => !value);
+                          setGoals((prev) => {
+                            if (danceInterest) return prev.filter((goal) => goal !== "dance_skill");
+                            return prev.includes("dance_skill") ? prev : [...prev, "dance_skill"];
+                          });
+                        }}>
+                          {danceInterest ? "On" : "Off"}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border p-4">
+                    <div className="flex items-center gap-2 font-medium">
+                      <Dumbbell className="h-4 w-4 text-primary" />
+                      Equipment available
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {equipmentOptions.map((item) => (
+                        <Button key={item} type="button" size="sm" variant={equipmentAccess.includes(item) ? "default" : "outline"} onClick={() => toggleEquipment(item)}>
+                          {item}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <Label htmlFor="injuries" className="flex items-center gap-2">
+                        <Shield className="h-4 w-4" />
+                        Injury notes
+                      </Label>
+                      <Input id="injuries" placeholder="e.g., knee pain, shoulder history" value={injuries} onChange={(event) => setInjuries(event.target.value)} className="mt-2 h-12" />
+                    </div>
+                    <div>
+                      <Label htmlFor="pain">Pain points to avoid</Label>
+                      <Input id="pain" placeholder="e.g., jumping, deep squats" value={painPoints} onChange={(event) => setPainPoints(event.target.value)} className="mt-2 h-12" />
+                    </div>
+                  </div>
+
+                  <div>
+                    <Label>Coaching tone</Label>
+                    <div className="mt-2 grid grid-cols-3 gap-2">
+                      {(["friendly", "motivational", "strict"] as const).map((tone) => (
+                        <Button key={tone} type="button" variant={coachingTone === tone ? "default" : "outline"} className="capitalize" onClick={() => setCoachingTone(tone)}>
+                          {tone}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Diet Step */}
               {steps[currentStep].id === "diet" && (
                 <div className="space-y-6">
@@ -482,9 +609,23 @@ export default function OnboardingPage() {
                   </div>
                   <h2 className="text-3xl font-bold mb-3">You're All Set, {name}!</h2>
                   <p className="text-muted-foreground max-w-md mx-auto mb-8">
-                    Your personalized fitness journey is ready. We've created workout and nutrition 
-                    plans based on your goals and preferences.
+                    Your coach is calibrated around your goals, available time, equipment, safety notes, and preferred coaching tone.
                   </p>
+
+                  <div className="mx-auto mb-8 grid max-w-xl gap-3 text-left md:grid-cols-3">
+                    <div className="rounded-xl border bg-muted/40 p-3">
+                      <p className="text-sm font-medium">Day 1</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{danceInterest || goals.includes("dance_skill") ? "Hip-hop baseline" : "Fitness baseline"} • {workoutDuration} min</p>
+                    </div>
+                    <div className="rounded-xl border bg-muted/40 p-3">
+                      <p className="text-sm font-medium">Day 2</p>
+                      <p className="mt-1 text-xs text-muted-foreground">Weak metric practice • short technique block</p>
+                    </div>
+                    <div className="rounded-xl border bg-muted/40 p-3">
+                      <p className="text-sm font-medium">Day 3</p>
+                      <p className="mt-1 text-xs text-muted-foreground">Repeat and unlock first achievement</p>
+                    </div>
+                  </div>
 
                   <div className="flex flex-wrap justify-center gap-2 mb-8">
                     {goals.map((goal) => (
