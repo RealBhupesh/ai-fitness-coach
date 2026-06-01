@@ -2307,7 +2307,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   );
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(249,115,22,0.12),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(6,182,212,0.12),_transparent_26%),linear-gradient(180deg,_#09090b,_#111827_45%,_#09090b)] text-zinc-100">
+    <div className="min-h-screen bg-[linear-gradient(135deg,_rgba(190,255,90,0.08),_transparent_32%),linear-gradient(225deg,_rgba(45,212,191,0.08),_transparent_30%),linear-gradient(180deg,_#070b0f,_#10151b_45%,_#070b0f)] text-zinc-100">
       <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 px-4 py-6 sm:px-6 xl:px-8">
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1.8fr)_minmax(360px,1fr)]">
           <div className="space-y-4">
@@ -2315,8 +2315,8 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
               <CardHeader className="pb-4">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
                   <div>
-                    <Badge className="mb-3 bg-orange-500/15 text-orange-300">{mode === "dance" ? "Dance coach" : "Workout coach"}</Badge>
-                    <CardTitle className="text-3xl">{exercise.label}</CardTitle>
+                    <Badge className="mb-3">{mode === "dance" ? "Dance coach" : "Workout coach"}</Badge>
+                    <CardTitle className="text-4xl font-black uppercase">{exercise.label}</CardTitle>
                     <CardDescription className="mt-2 max-w-3xl text-zinc-400">{exerciseDescription}</CardDescription>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -2325,7 +2325,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                         key={item.id}
                         size="sm"
                         variant={item.id === exerciseId ? "default" : "outline"}
-                        className={cn(item.id === exerciseId ? "bg-gradient-to-r from-orange-500 to-rose-500 text-white" : "border-zinc-700 bg-zinc-950 text-zinc-200")}
+                        className={cn(item.id === exerciseId ? "bg-primary text-primary-foreground" : "border-zinc-700 bg-zinc-950 text-zinc-200")}
                         onClick={() => {
                           if (item.id === exerciseId) return;
                           stopCamera();

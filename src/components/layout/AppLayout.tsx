@@ -22,8 +22,8 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import {
   Activity,
   Calendar,
+  CircleGauge,
   Dumbbell,
-  Flame,
   Home,
   LayoutDashboard,
   LogOut,
@@ -38,6 +38,7 @@ import {
   Trophy,
   User,
   Utensils,
+  Zap,
 } from "lucide-react";
 
 const mainNavItems = [
@@ -64,14 +65,13 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { profile, session, loading } = useUserProfile();
   const demoMode = Boolean(session?.user?.id && isDemoUser(session.user.id));
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [theme, setTheme] = useState<"light" | "dark">("dark");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem("theme") as "light" | "dark" | null;
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const nextTheme = saved || (prefersDark ? "dark" : "light");
+    const nextTheme = saved || "dark";
     setTheme(nextTheme);
     document.documentElement.classList.toggle("dark", nextTheme === "dark");
   }, []);
@@ -118,7 +118,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   };
 
   if (isPublicRoute || isMinimalRoute) {
-    return <div className="min-h-screen bg-background">{children}</div>;
+    return <div className="performance-shell min-h-screen bg-background">{children}</div>;
   }
 
   const NavLink = ({ href, label, icon: Icon }: { href: string; label: string; icon: typeof Home }) => {
@@ -128,12 +128,12 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         href={href}
         onClick={() => setMobileOpen(false)}
         className={cn(
-          "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all",
-          isActive ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground",
+          "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-all",
+          isActive ? "bg-primary text-primary-foreground shadow-[0_0_30px_color-mix(in_oklch,var(--primary)_22%,transparent)]" : "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
           sidebarCollapsed && "justify-center px-2",
         )}
       >
-        <Icon className="h-5 w-5 shrink-0" />
+        <Icon className={cn("h-5 w-5 shrink-0", isActive ? "text-primary-foreground" : "group-hover:text-primary")} />
         {!sidebarCollapsed && <span>{label}</span>}
       </Link>
     );
@@ -142,13 +142,14 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const sidebar = (
     <div className="flex h-full flex-col">
       <div className={cn("flex items-center gap-3 px-4 py-6", sidebarCollapsed && "justify-center px-2")}>
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-orange-500 to-rose-500">
-          <Flame className="h-6 w-6 text-white" />
+        <div className="relative flex h-11 w-11 items-center justify-center rounded-full border border-primary/30 bg-primary/10 shadow-[0_0_30px_color-mix(in_oklch,var(--primary)_20%,transparent)]">
+          <CircleGauge className="h-6 w-6 text-primary" />
+          <span className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full bg-accent shadow-[0_0_16px_var(--accent)]" />
         </div>
         {!sidebarCollapsed && (
           <div>
-            <h1 className="font-semibold">FitCoach AI</h1>
-            <p className="text-xs text-muted-foreground">Real-time coaching</p>
+            <h1 className="text-sm font-black uppercase tracking-[0.18em]">FitCoach AI</h1>
+            <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">strain recovery skill</p>
           </div>
         )}
       </div>
@@ -159,7 +160,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             <NavLink key={item.href} {...item} />
           ))}
         </div>
-        <div className={cn("my-4 px-3 text-xs uppercase tracking-wide text-muted-foreground", sidebarCollapsed && "hidden")}>
+        <div className={cn("my-4 px-3 text-[10px] font-bold uppercase tracking-[0.24em] text-muted-foreground", sidebarCollapsed && "hidden")}>
           AI Coaching
         </div>
         <div className="space-y-1">
@@ -169,12 +170,12 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </ScrollArea>
 
-      <div className="border-t p-3">
+      <div className="border-t border-sidebar-border p-3">
         <Link
           href="/settings"
           className={cn(
-            "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground",
-            pathname === "/settings" && "bg-primary/10 text-primary",
+            "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
+            pathname === "/settings" && "bg-primary text-primary-foreground",
             sidebarCollapsed && "justify-center px-2",
           )}
         >
@@ -194,10 +195,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       .toUpperCase() || "FC";
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="performance-shell min-h-screen bg-background">
       <aside
         className={cn(
-          "fixed left-0 top-0 z-40 hidden h-screen border-r bg-card/50 backdrop-blur-xl transition-all duration-300 lg:block",
+          "fixed left-0 top-0 z-40 hidden h-screen border-r border-sidebar-border bg-sidebar/90 shadow-[24px_0_90px_rgba(0,0,0,0.24)] backdrop-blur-xl transition-all duration-300 lg:block",
           sidebarCollapsed ? "w-[72px]" : "w-64",
         )}
       >
@@ -206,13 +207,13 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           variant="ghost"
           size="icon"
           onClick={toggleSidebar}
-          className="absolute -right-3 top-20 h-6 w-6 rounded-full border bg-background shadow-md"
+          className="absolute -right-3 top-20 h-6 w-6 rounded-full border bg-card shadow-md"
         >
           <Target className="h-3 w-3" />
         </Button>
       </aside>
 
-      <header className="sticky top-0 z-50 flex h-16 items-center gap-4 border-b bg-background/90 px-4 backdrop-blur lg:hidden">
+      <header className="sticky top-0 z-50 flex h-16 items-center gap-4 border-b border-border/70 bg-background/88 px-4 backdrop-blur-xl lg:hidden">
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
           <SheetTrigger asChild>
             <Button variant="ghost" size="icon">
@@ -224,8 +225,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           </SheetContent>
         </Sheet>
         <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-orange-500 to-rose-500">
-            <Flame className="h-5 w-5 text-white" />
+          <div className="flex h-8 w-8 items-center justify-center rounded-full border border-primary/30 bg-primary/10">
+            <CircleGauge className="h-5 w-5 text-primary" />
           </div>
           <span className="font-semibold">{navTitle}</span>
         </div>
@@ -246,13 +247,13 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
       <header
         className={cn(
-          "sticky top-0 z-30 hidden h-16 items-center justify-between border-b bg-background/90 px-6 backdrop-blur lg:flex",
+          "sticky top-0 z-30 hidden h-16 items-center justify-between border-b border-border/70 bg-background/82 px-6 backdrop-blur-xl lg:flex",
           sidebarCollapsed ? "pl-[calc(72px+1.5rem)]" : "pl-[calc(16rem+1.5rem)]",
         )}
       >
         <div>
-          <h2 className="text-lg font-semibold">{navTitle}</h2>
-          <p className="text-xs text-muted-foreground">
+          <h2 className="text-lg font-black uppercase tracking-[0.12em]">{navTitle}</h2>
+          <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
             {profile?.goals?.length ? `Current focus: ${profile.goals[0].replace(/_/g, " ")}` : "Complete your profile to personalize coaching"}
           </p>
         </div>
@@ -261,11 +262,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           {profile ? (
             <div className="hidden items-center gap-4 text-sm text-muted-foreground md:flex">
               <div className="flex items-center gap-1.5">
-                <Target className="h-4 w-4 text-orange-500" />
+                <Target className="h-4 w-4 text-primary" />
                 <span>{profile.goals[0]?.replace(/_/g, " ") || "Set a goal"}</span>
               </div>
               <div className="flex items-center gap-1.5">
-                <Flame className="h-4 w-4 text-rose-500" />
+                <Zap className="h-4 w-4 text-accent" />
                 <span>{profile.workoutFrequency ?? 0} days/week target</span>
               </div>
             </div>
@@ -314,7 +315,7 @@ function UserMenu({
         <Button variant="ghost" className="relative h-9 w-9 rounded-full">
           <Avatar className="h-9 w-9 ring-2 ring-primary/20">
             <AvatarImage alt={name} />
-            <AvatarFallback className="bg-gradient-to-br from-orange-500 to-rose-500 text-white text-sm">
+            <AvatarFallback className="bg-primary text-primary-foreground text-sm font-black">
               {loading ? "…" : initials}
             </AvatarFallback>
           </Avatar>

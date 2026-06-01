@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
-import { Outfit, JetBrains_Mono } from "next/font/google";
+import { Archivo, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { AppLayout } from "@/components/layout/AppLayout";
 import ErrorReporter from "@/components/ErrorReporter";
 import { Toaster } from "sonner";
 
-const outfit = Outfit({
+const archivo = Archivo({
   subsets: ["latin"],
   variable: "--font-geist-sans",
+  weight: ["400", "500", "600", "700", "800", "900"],
 });
 
 const jetbrainsMono = JetBrains_Mono({
@@ -28,7 +29,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${outfit.variable} ${jetbrainsMono.variable} font-sans antialiased`}>
+      <body className={`${archivo.variable} ${jetbrainsMono.variable} font-sans antialiased`}>
         <ErrorReporter />
         <AppLayout>{children}</AppLayout>
         <Toaster

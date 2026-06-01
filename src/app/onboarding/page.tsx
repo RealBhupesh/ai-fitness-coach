@@ -204,10 +204,8 @@ export default function OnboardingPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4">
-      <div className="absolute inset-0 -z-10 bg-[linear-gradient(180deg,_hsl(var(--background)),_hsl(var(--muted)))]" />
-
-      <Card className="w-full max-w-2xl shadow-2xl border-0 bg-card/80 backdrop-blur-xl">
+    <div className="performance-shell flex min-h-screen items-center justify-center p-4">
+      <Card className="w-full max-w-3xl border-border bg-card/90 shadow-[0_30px_100px_rgba(0,0,0,0.35)] backdrop-blur-xl">
         <CardHeader className="pb-2">
           {/* Step indicators */}
           <div className="flex justify-center gap-2 mb-6">
@@ -219,9 +217,9 @@ export default function OnboardingPage() {
                   className={cn(
                     "w-10 h-10 rounded-full flex items-center justify-center transition-all duration-300",
                     i < currentStep
-                      ? "bg-gradient-to-br from-orange-500 to-rose-500 text-white"
+                      ? "bg-primary text-primary-foreground"
                       : i === currentStep
-                      ? "bg-gradient-to-br from-orange-500 to-rose-500 text-white ring-4 ring-orange-500/20"
+                      ? "bg-primary text-primary-foreground ring-4 ring-primary/20"
                       : "bg-muted text-muted-foreground"
                   )}
                 >
@@ -245,10 +243,10 @@ export default function OnboardingPage() {
               {/* Welcome Step */}
               {steps[currentStep].id === "welcome" && (
                 <div className="text-center py-8">
-                  <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-orange-500 to-rose-500 flex items-center justify-center mx-auto mb-6 shadow-lg">
-                    <Flame className="h-10 w-10 text-white" />
+                  <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full border border-primary/30 bg-primary/10 shadow-[0_0_40px_color-mix(in_oklch,var(--primary)_20%,transparent)]">
+                    <Flame className="h-10 w-10 text-primary" />
                   </div>
-                  <h2 className="text-3xl font-bold mb-3">Welcome to FitCoach AI</h2>
+                  <h2 className="mb-3 text-4xl font-black uppercase leading-none">Welcome to FitCoach AI</h2>
                   <p className="text-muted-foreground max-w-md mx-auto mb-6">
                     Let's personalize your fitness journey. Answer a few questions so we can create
                     the perfect workout and nutrition plan for you.
@@ -261,7 +259,7 @@ export default function OnboardingPage() {
               {steps[currentStep].id === "basics" && (
                 <div className="space-y-6">
                   <div className="text-center mb-8">
-                    <h2 className="text-2xl font-bold">What should we call you?</h2>
+                    <h2 className="text-3xl font-black uppercase">What should we call you?</h2>
                     <p className="text-muted-foreground">Let's get to know each other</p>
                   </div>
 
@@ -316,7 +314,7 @@ export default function OnboardingPage() {
               {steps[currentStep].id === "body" && (
                 <div className="space-y-6">
                   <div className="text-center mb-8">
-                    <h2 className="text-2xl font-bold">Your Body Stats</h2>
+                    <h2 className="text-3xl font-black uppercase">Your Body Stats</h2>
                     <p className="text-muted-foreground">This helps us calculate your targets (optional)</p>
                   </div>
 
@@ -366,7 +364,7 @@ export default function OnboardingPage() {
               {steps[currentStep].id === "goals" && (
                 <div className="space-y-6">
                   <div className="text-center mb-8">
-                    <h2 className="text-2xl font-bold">What are your goals?</h2>
+                    <h2 className="text-3xl font-black uppercase">What are your goals?</h2>
                     <p className="text-muted-foreground">Select up to 3 fitness goals</p>
                   </div>
 
@@ -379,7 +377,7 @@ export default function OnboardingPage() {
                           key={goal.value}
                           onClick={() => toggleGoal(goal.value)}
                           className={cn(
-                            "flex items-center gap-4 p-4 rounded-xl border-2 transition-all text-left",
+                            "flex items-center gap-4 p-4 rounded-lg border transition-all text-left",
                             isSelected
                               ? "border-primary bg-primary/5"
                               : "border-border hover:border-primary/50"
@@ -389,7 +387,7 @@ export default function OnboardingPage() {
                             className={cn(
                               "w-12 h-12 rounded-xl flex items-center justify-center",
                               isSelected
-                                ? "bg-gradient-to-br from-orange-500 to-rose-500 text-white"
+                                ? "bg-primary text-primary-foreground"
                                 : "bg-muted"
                             )}
                           >
@@ -413,7 +411,7 @@ export default function OnboardingPage() {
               {steps[currentStep].id === "experience" && (
                 <div className="space-y-6">
                   <div className="text-center mb-8">
-                    <h2 className="text-2xl font-bold">Your Fitness Level</h2>
+                    <h2 className="text-3xl font-black uppercase">Your Fitness Level</h2>
                     <p className="text-muted-foreground">This helps us tailor your workouts</p>
                   </div>
 
@@ -423,7 +421,7 @@ export default function OnboardingPage() {
                         key={level.value}
                         onClick={() => setExperience(level.value)}
                         className={cn(
-                          "w-full flex items-center gap-4 p-4 rounded-xl border-2 transition-all text-left",
+                          "w-full flex items-center gap-4 p-4 rounded-lg border transition-all text-left",
                           experience === level.value
                             ? "border-primary bg-primary/5"
                             : "border-border hover:border-primary/50"
@@ -433,7 +431,7 @@ export default function OnboardingPage() {
                           className={cn(
                             "w-12 h-12 rounded-xl flex items-center justify-center",
                             experience === level.value
-                              ? "bg-gradient-to-br from-orange-500 to-rose-500 text-white"
+                              ? "bg-primary text-primary-foreground"
                               : "bg-muted"
                           )}
                         >
@@ -456,12 +454,12 @@ export default function OnboardingPage() {
               {steps[currentStep].id === "calibration" && (
                 <div className="space-y-6">
                   <div className="text-center mb-8">
-                    <h2 className="text-2xl font-bold">Calibrate your coach</h2>
+                    <h2 className="text-3xl font-black uppercase">Calibrate your coach</h2>
                     <p className="text-muted-foreground">This decides how the app guides your first week.</p>
                   </div>
 
                   <div className="grid gap-4 md:grid-cols-2">
-                    <div className="rounded-xl border p-4">
+                    <div className="rounded-lg border bg-background/35 p-4">
                       <div className="flex items-center gap-2 font-medium">
                         <Clock className="h-4 w-4 text-primary" />
                         Weekly schedule
@@ -478,7 +476,7 @@ export default function OnboardingPage() {
                       </div>
                     </div>
 
-                    <div className="rounded-xl border p-4">
+                    <div className="rounded-lg border bg-background/35 p-4">
                       <div className="flex items-center gap-2 font-medium">
                         <Timer className="h-4 w-4 text-primary" />
                         Session length
@@ -508,7 +506,7 @@ export default function OnboardingPage() {
                     </div>
                   </div>
 
-                  <div className="rounded-xl border p-4">
+                  <div className="rounded-lg border bg-background/35 p-4">
                     <div className="flex items-center gap-2 font-medium">
                       <Dumbbell className="h-4 w-4 text-primary" />
                       Equipment available
@@ -553,7 +551,7 @@ export default function OnboardingPage() {
               {steps[currentStep].id === "diet" && (
                 <div className="space-y-6">
                   <div className="text-center mb-8">
-                    <h2 className="text-2xl font-bold">Dietary Preferences</h2>
+                    <h2 className="text-3xl font-black uppercase">Dietary Preferences</h2>
                     <p className="text-muted-foreground">Select all that apply (optional)</p>
                   </div>
 
@@ -566,7 +564,7 @@ export default function OnboardingPage() {
                           key={diet.value}
                           onClick={() => toggleDiet(diet.value)}
                           className={cn(
-                            "flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all",
+                            "flex flex-col items-center gap-2 p-4 rounded-lg border transition-all",
                             isSelected
                               ? "border-primary bg-primary/5"
                               : "border-border hover:border-primary/50"
@@ -576,7 +574,7 @@ export default function OnboardingPage() {
                             className={cn(
                               "w-10 h-10 rounded-lg flex items-center justify-center",
                               isSelected
-                                ? "bg-gradient-to-br from-orange-500 to-rose-500 text-white"
+                                ? "bg-primary text-primary-foreground"
                                 : "bg-muted"
                             )}
                           >
@@ -604,24 +602,24 @@ export default function OnboardingPage() {
               {/* Complete Step */}
               {steps[currentStep].id === "complete" && (
                 <div className="text-center py-8">
-                  <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center mx-auto mb-6 shadow-lg">
+                  <div className="w-20 h-20 rounded-2xl bg-primary flex items-center justify-center mx-auto mb-6 shadow-lg">
                     <Check className="h-10 w-10 text-white" />
                   </div>
-                  <h2 className="text-3xl font-bold mb-3">You're All Set, {name}!</h2>
+                  <h2 className="mb-3 text-4xl font-black uppercase leading-none">You're All Set, {name}!</h2>
                   <p className="text-muted-foreground max-w-md mx-auto mb-8">
                     Your coach is calibrated around your goals, available time, equipment, safety notes, and preferred coaching tone.
                   </p>
 
                   <div className="mx-auto mb-8 grid max-w-xl gap-3 text-left md:grid-cols-3">
-                    <div className="rounded-xl border bg-muted/40 p-3">
+                    <div className="rounded-lg border bg-muted/25 p-3">
                       <p className="text-sm font-medium">Day 1</p>
                       <p className="mt-1 text-xs text-muted-foreground">{danceInterest || goals.includes("dance_skill") ? "Hip-hop baseline" : "Fitness baseline"} • {workoutDuration} min</p>
                     </div>
-                    <div className="rounded-xl border bg-muted/40 p-3">
+                    <div className="rounded-lg border bg-muted/25 p-3">
                       <p className="text-sm font-medium">Day 2</p>
                       <p className="mt-1 text-xs text-muted-foreground">Weak metric practice • short technique block</p>
                     </div>
-                    <div className="rounded-xl border bg-muted/40 p-3">
+                    <div className="rounded-lg border bg-muted/25 p-3">
                       <p className="text-sm font-medium">Day 3</p>
                       <p className="mt-1 text-xs text-muted-foreground">Repeat and unlock first achievement</p>
                     </div>
@@ -661,7 +659,7 @@ export default function OnboardingPage() {
               <Button
                 onClick={handleComplete}
                 disabled={saving}
-                className="gap-2 bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600"
+                className="gap-2"
               >
                 {saving ? "Saving..." : "Go to Dashboard"}
                 <ArrowRight className="h-4 w-4" />
@@ -670,7 +668,7 @@ export default function OnboardingPage() {
               <Button
                 onClick={handleNext}
                 disabled={!canProceed()}
-                className="gap-2 bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600"
+                className="gap-2"
               >
                 Continue
                 <ArrowRight className="h-4 w-4" />

@@ -132,13 +132,14 @@ export default function DashboardPage() {
   const firstTime = !loading && summary.totalWorkouts === 0;
 
   return (
-    <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+    <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-6 lg:p-8">
       <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold">
+          <Badge className="mb-3">Daily readiness loop</Badge>
+          <h1 className="text-3xl font-black uppercase leading-none md:text-5xl">
             Welcome back, <span className="gradient-text">{name}</span>
           </h1>
-          <p className="text-muted-foreground mt-1">
+          <p className="mt-3 max-w-2xl text-sm text-muted-foreground">
             {profile?.goals?.length ? `Current focus: ${profile.goals.map((goal) => goal.replace(/_/g, " ")).join(", ")}` : "Complete onboarding to personalize your coach."}
           </p>
         </div>
@@ -150,7 +151,7 @@ export default function DashboardPage() {
             </Button>
           </Link>
           <Link href="/coach/workout">
-            <Button className="gap-2 bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600">
+            <Button className="gap-2">
               <Play className="h-4 w-4" />
               Start Session
             </Button>
@@ -159,10 +160,10 @@ export default function DashboardPage() {
       </motion.div>
 
       {loading ? (
-        <Card className="border-cyan-500/20 bg-gradient-to-br from-cyan-500/10 to-emerald-500/10">
+        <Card className="border-primary/20 bg-primary/5">
           <CardContent className="grid gap-4 pt-6 lg:grid-cols-[1.2fr_0.8fr]">
             <div>
-              <Badge className="mb-3 bg-cyan-500/15 text-cyan-700 dark:text-cyan-200">Building coach plan</Badge>
+              <Badge className="mb-3">Building coach plan</Badge>
               <div className="h-7 w-56 animate-pulse rounded bg-muted" />
               <div className="mt-3 h-4 w-full max-w-xl animate-pulse rounded bg-muted" />
             </div>
@@ -173,14 +174,14 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       ) : agent ? (
-        <Card className="overflow-hidden border-cyan-500/20 bg-gradient-to-br from-cyan-500/10 via-background to-emerald-500/10">
+        <Card className="overflow-hidden border-primary/25 bg-[linear-gradient(135deg,color-mix(in_oklch,var(--primary)_10%,transparent),color-mix(in_oklch,var(--card)_92%,transparent)_44%,color-mix(in_oklch,var(--accent)_9%,transparent))]">
           <CardContent className="grid gap-5 pt-6 lg:grid-cols-[1.35fr_0.65fr]">
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <Badge className="bg-cyan-500/15 text-cyan-700 dark:text-cyan-200">{agent.todayPlan.title}</Badge>
+                <Badge>{agent.todayPlan.title}</Badge>
                 <Badge variant="outline" className="capitalize">{agent.preSessionBrief.priority}</Badge>
               </div>
-              <h2 className="mt-3 text-xl font-semibold md:text-2xl">
+              <h2 className="mt-3 max-w-2xl text-3xl font-black uppercase leading-[0.95] md:text-5xl">
                 {firstTime ? "Your first move is a short coached baseline." : agent.primarySessionRecommendation.label}
               </h2>
               <p className="mt-2 max-w-2xl text-sm text-muted-foreground">{agent.primarySessionRecommendation.reason}</p>
@@ -191,7 +192,7 @@ export default function DashboardPage() {
               </div>
               <div className="mt-5 flex flex-col gap-2 sm:flex-row">
                 <Link href={agent.todayPlan.primaryHref}>
-                  <Button className="w-full gap-2 bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600 sm:w-auto">
+                  <Button className="w-full gap-2 sm:w-auto">
                     {agent.primarySessionRecommendation.type === "dance" ? <Music2 className="h-4 w-4" /> : <Dumbbell className="h-4 w-4" />}
                     {agent.todayPlan.primaryAction}
                   </Button>
@@ -204,16 +205,16 @@ export default function DashboardPage() {
                 </Link>
               </div>
             </div>
-            <div className="space-y-3 rounded-lg border bg-background/70 p-4">
+            <div className="space-y-3 rounded-lg border border-border/70 bg-background/55 p-4 backdrop-blur">
               <div className="flex items-start gap-3">
-                <CheckCircle2 className="mt-0.5 h-5 w-5 text-emerald-500" />
+                <CheckCircle2 className="mt-0.5 h-5 w-5 text-primary" />
                 <div>
                   <p className="font-medium">Focus metric: {agent.focusMetric.label}</p>
                   <p className="mt-1 text-sm text-muted-foreground">{agent.focusMetric.cue}</p>
                 </div>
               </div>
               {agent.closestAchievement ? (
-                <div className="rounded-md border bg-muted/30 p-3">
+                <div className="rounded-md border bg-muted/25 p-3">
                   <div className="flex items-center justify-between gap-3">
                     <p className="font-medium">{agent.closestAchievement.icon} {agent.closestAchievement.name}</p>
                     <Badge>{agent.closestAchievement.percent}%</Badge>
@@ -269,16 +270,16 @@ export default function DashboardPage() {
       </div>
 
       {agent ? (
-        <Card className="border-cyan-500/20 bg-gradient-to-br from-cyan-500/10 to-fuchsia-500/10">
+        <Card className="border-accent/20 bg-accent/5">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Bot className="h-5 w-5 text-cyan-500" />
+              <Bot className="h-5 w-5 text-accent" />
               Agentic Coach Brief
             </CardTitle>
             <CardDescription>The coach decides from saved scorecards, calories, reps, dance timing, achievements, and streak evidence.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 lg:grid-cols-3">
-            <div className="rounded-xl border bg-background/70 p-4">
+            <div className="rounded-lg border bg-background/55 p-4">
               <div className="flex items-center justify-between gap-3">
                 <p className="font-medium">Next best action</p>
                 <Badge className="capitalize">{agent.preSessionBrief.priority}</Badge>
@@ -286,7 +287,7 @@ export default function DashboardPage() {
               <p className="mt-2 text-sm text-muted-foreground">{agent.preSessionBrief.nextAction}</p>
               <p className="mt-3 text-xs text-muted-foreground">{agent.preSessionBrief.reason}</p>
             </div>
-            <div className="rounded-xl border bg-background/70 p-4">
+            <div className="rounded-lg border bg-background/55 p-4">
               <p className="font-medium">Coach memory</p>
               <div className="mt-3 flex flex-wrap gap-2">
                 {[agent.memory.recommendedFocus, ...agent.memory.weakMetrics.slice(0, 3)].filter(Boolean).map((item) => (
@@ -295,7 +296,7 @@ export default function DashboardPage() {
               </div>
               <p className="mt-3 text-sm text-muted-foreground">{agent.preSessionBrief.planAdjustment}</p>
             </div>
-            <div className="rounded-xl border bg-background/70 p-4">
+            <div className="rounded-lg border bg-background/55 p-4">
               <p className="font-medium">Weekly agent report</p>
               <p className="mt-2 text-sm text-muted-foreground">{agent.weeklyReport.summary}</p>
               <p className="mt-3 text-xs text-muted-foreground">{agent.closestAchievement?.nextAction ?? agent.achievementRecommendation}</p>
@@ -316,7 +317,7 @@ export default function DashboardPage() {
           <CardContent className="space-y-3">
             {summary.recentSessions.length ? (
               summary.recentSessions.map((session) => (
-                <div key={session.id} className="rounded-xl border p-4">
+                <div key={session.id} className="rounded-lg border bg-background/35 p-4">
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <div className="font-medium capitalize">{session.exerciseType || session.type}</div>

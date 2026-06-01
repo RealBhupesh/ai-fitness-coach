@@ -5,7 +5,7 @@ import { AICoachChat } from "@/components/AICoachChat";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useUserProfile } from "@/hooks/useUserProfile";
-import { Brain, Dumbbell, Heart, Music2, Sparkles, TrendingUp, Utensils, Zap } from "lucide-react";
+import { Brain, CircleGauge, Dumbbell, Heart, Music2, TrendingUp, Utensils, Zap } from "lucide-react";
 
 const capabilities = [
   { icon: Dumbbell, label: "Workout Planning", description: "Custom training blocks and form guidance" },
@@ -31,11 +31,11 @@ export default function ChatPage() {
     <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
       <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }}>
         <div className="flex items-center gap-3 mb-2">
-          <div className="p-2 rounded-xl bg-gradient-to-br from-orange-500 to-rose-500">
-            <Sparkles className="h-5 w-5 text-white" />
+          <div className="rounded-full border border-primary/30 bg-primary/10 p-2">
+            <CircleGauge className="h-5 w-5 text-primary" />
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold">AI Fitness Coach</h1>
-          <Badge className="bg-gradient-to-r from-orange-500 to-rose-500 text-white">
+          <h1 className="text-3xl font-black uppercase md:text-5xl">AI Fitness Coach</h1>
+          <Badge>
             <Zap className="h-3 w-3 mr-1" />
             Groq-ready coach
           </Badge>
@@ -88,11 +88,11 @@ export default function ChatPage() {
             </CardContent>
           </Card>
 
-          <Card className="bg-gradient-to-br from-primary/5 to-primary/10 border-primary/20">
+          <Card className="border-primary/20 bg-primary/5">
             <CardContent className="pt-6">
               <div className="flex items-start gap-3">
-                <div className="p-2 rounded-lg bg-gradient-to-br from-orange-500 to-rose-500">
-                  <Brain className="h-4 w-4 text-white" />
+                <div className="rounded-lg bg-primary/10 p-2">
+                  <Brain className="h-4 w-4 text-primary" />
                 </div>
                 <div>
                   <h4 className="font-medium text-sm">Best prompt pattern</h4>

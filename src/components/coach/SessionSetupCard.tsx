@@ -47,9 +47,9 @@ export function SessionSetupCard({
   onDemoFallback,
 }: Props) {
   return (
-    <Card className="w-full max-w-lg border-zinc-800 bg-zinc-900/90 text-zinc-100 shadow-2xl">
+    <Card className="w-full max-w-lg border-primary/20 bg-[#10151a]/94 text-zinc-100 shadow-[0_30px_100px_rgba(0,0,0,0.55)]">
       <CardHeader className="space-y-3">
-        <Badge className="w-fit bg-orange-500/15 text-orange-300">Pre-session calibration</Badge>
+        <Badge className="w-fit">Pre-session calibration</Badge>
         <div>
           <CardTitle className="text-xl">{title}</CardTitle>
           <CardDescription className="mt-1 text-zinc-400">{description}</CardDescription>
@@ -64,18 +64,18 @@ export function SessionSetupCard({
         </div>
 
         {whyThisSession ? (
-          <div className="rounded-2xl border border-cyan-500/25 bg-cyan-500/10 p-4 text-sm text-zinc-200">
+          <div className="rounded-lg border border-accent/25 bg-accent/10 p-4 text-sm text-zinc-200">
             <p className="font-medium text-cyan-100">Why this session</p>
             <p className="mt-1 text-zinc-300">{whyThisSession}</p>
           </div>
         ) : null}
 
         {focusMetric ? (
-          <div className="rounded-2xl border border-orange-500/25 bg-orange-500/10 p-4 text-sm">
+          <div className="rounded-lg border border-primary/25 bg-primary/10 p-4 text-sm">
             <div className="flex items-start gap-3">
-              <Target className="mt-0.5 h-4 w-4 text-orange-300" />
+              <Target className="mt-0.5 h-4 w-4 text-primary" />
               <div>
-                <p className="font-medium text-orange-100">Today: {focusMetric.label}</p>
+                <p className="font-medium text-primary">Today: {focusMetric.label}</p>
                 <p className="mt-1 text-zinc-300">{focusMetric.cue}</p>
                 <p className="mt-2 text-xs text-zinc-400">Target: {focusMetric.target} • Measured by: {focusMetric.measuredValue}</p>
               </div>
@@ -110,7 +110,7 @@ export function SessionSetupCard({
 
         <div className="flex flex-col gap-3 sm:flex-row">
           {!cameraOn ? (
-            <Button className="flex-1 gap-2 bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600" onClick={onEnableCamera} disabled={loading}>
+            <Button className="flex-1 gap-2" onClick={onEnableCamera} disabled={loading}>
               <Camera className="h-4 w-4" />
               {loading ? "Loading camera..." : "Enable camera"}
             </Button>

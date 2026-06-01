@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { Bot, Brain, Check, Copy, Loader2, Send, Sparkles, TrendingUp, Utensils, Dumbbell, Music2, User } from "lucide-react";
+import { Bot, Check, CircleGauge, Copy, Loader2, Send, Sparkles, TrendingUp, Utensils, Dumbbell, Music2, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -128,11 +128,11 @@ export function AICoachChat({ className }: { className?: string }) {
     <Card className={cn("flex flex-col overflow-hidden", className)}>
       <div className="border-b p-4">
         <div className="flex items-center gap-3">
-          <div className="p-2 rounded-xl bg-gradient-to-br from-orange-500 to-rose-500">
-            <Bot className="h-5 w-5 text-white" />
+          <div className="rounded-full border border-primary/30 bg-primary/10 p-2">
+            <CircleGauge className="h-5 w-5 text-primary" />
           </div>
           <div>
-            <h2 className="font-semibold">FitCoach AI</h2>
+            <h2 className="font-black uppercase tracking-[0.12em]">FitCoach AI</h2>
             <p className="text-xs text-muted-foreground">
               {profile?.name ? `Profile-aware coaching for ${profile.name}` : "Coaching becomes more personalized after onboarding."}
             </p>
@@ -144,7 +144,7 @@ export function AICoachChat({ className }: { className?: string }) {
         <div className="p-4 space-y-4">
           {messages.length === 0 ? (
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="text-center py-8">
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-orange-500/10 to-rose-500/10 flex items-center justify-center mx-auto mb-4">
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full border border-primary/25 bg-primary/10">
                 <Sparkles className="h-8 w-8 text-primary" />
               </div>
               <h3 className="font-semibold mb-2">Start with a strong prompt</h3>
@@ -173,8 +173,8 @@ export function AICoachChat({ className }: { className?: string }) {
           {messages.map((message) => (
             <div key={message.id} className={cn("flex gap-3", message.role === "user" ? "justify-end" : "justify-start")}>
               {message.role !== "user" ? (
-                <div className="shrink-0 w-8 h-8 rounded-lg bg-gradient-to-br from-orange-500 to-rose-500 flex items-center justify-center">
-                  <Bot className="h-4 w-4 text-white" />
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                  <Bot className="h-4 w-4 text-primary" />
                 </div>
               ) : null}
               <div
@@ -205,8 +205,8 @@ export function AICoachChat({ className }: { className?: string }) {
 
           {isLoading ? (
             <div className="flex gap-3 justify-start">
-              <div className="shrink-0 w-8 h-8 rounded-lg bg-gradient-to-br from-orange-500 to-rose-500 flex items-center justify-center">
-                <Bot className="h-4 w-4 text-white" />
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                <Bot className="h-4 w-4 text-primary" />
               </div>
               <div className="rounded-2xl rounded-bl-md px-4 py-3 bg-muted">
                 <Loader2 className="h-4 w-4 animate-spin" />

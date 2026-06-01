@@ -23,6 +23,7 @@ import {
   Heart,
   Zap,
   CheckCircle2,
+  CircleGauge,
 } from "lucide-react";
 
 const fadeInUp = {
@@ -44,19 +45,19 @@ const features = [
     icon: Camera,
     title: "Real-Time Form Analysis",
     description: "AI-powered pose detection gives instant feedback on your exercise form using your device camera.",
-    color: "from-orange-500 to-rose-500",
+    color: "from-primary to-accent",
   },
   {
     icon: Brain,
     title: "Smart AI Coach",
     description: "Get personalized workout plans, nutrition advice, and answers to all your fitness questions.",
-    color: "from-violet-500 to-purple-500",
+    color: "from-accent to-primary",
   },
   {
     icon: Music2,
     title: "Dance Fitness",
     description: "Learn dance moves with posture guidance. From Zumba to Hip-Hop, groove your way to fitness.",
-    color: "from-pink-500 to-rose-500",
+    color: "from-cyan-400 to-primary",
   },
   {
     icon: Utensils,
@@ -98,65 +99,43 @@ export default function HomePage() {
   const hasProfile = profile && profile.name;
 
   return (
-    <div className="relative overflow-hidden">
+    <div className="performance-shell relative overflow-hidden">
       {/* Hero Section */}
-      <section className="relative min-h-[90vh] flex items-center">
-        {/* Background Effects */}
-        <div className="absolute inset-0 -z-10">
-          <div className="absolute top-0 left-1/4 w-96 h-96 bg-gradient-to-br from-orange-500/20 to-rose-500/20 rounded-full blur-3xl animate-pulse-glow" />
-          <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-gradient-to-br from-violet-500/20 to-purple-500/20 rounded-full blur-3xl animate-pulse-glow" style={{ animationDelay: "1s" }} />
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-gradient-to-br from-primary/5 to-transparent rounded-full blur-3xl" />
-        </div>
-
+      <section className="relative flex min-h-[90vh] items-center">
         <div className="container mx-auto px-4 py-16 md:py-24">
           <motion.div
-            className="max-w-4xl mx-auto text-center"
+            className="mx-auto grid max-w-6xl gap-10 lg:grid-cols-[1fr_420px] lg:items-center"
             initial="initial"
             animate="animate"
             variants={staggerContainer}
           >
-            <motion.div variants={fadeInUp}>
-              <Badge className="mb-6 px-4 py-1.5 text-sm bg-gradient-to-r from-orange-500/10 to-rose-500/10 border-orange-500/20 text-orange-600 dark:text-orange-400">
-                <Sparkles className="w-3.5 h-3.5 mr-1.5" />
-                AI-Powered Fitness Coaching
-              </Badge>
-            </motion.div>
+            <div>
+              <motion.div variants={fadeInUp}>
+                <Badge className="mb-6 px-4 py-1.5">
+                  <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                  Performance OS for fitness, dance, and nutrition
+                </Badge>
+              </motion.div>
 
-            <motion.h1
-              variants={fadeInUp}
-              className="text-4xl md:text-6xl lg:text-7xl font-bold tracking-tight mb-6"
-            >
-              Transform Your Body{" "}
-              <span className="relative">
-                <span className="bg-gradient-to-r from-orange-500 via-rose-500 to-violet-500 bg-clip-text text-transparent">
-                  With AI
-                </span>
-                <svg className="absolute -bottom-2 left-0 w-full" viewBox="0 0 300 12" fill="none">
-                  <path d="M2 10C60 3 120 3 150 6C180 9 240 9 298 3" stroke="url(#gradient)" strokeWidth="4" strokeLinecap="round"/>
-                  <defs>
-                    <linearGradient id="gradient" x1="0" y1="0" x2="300" y2="0">
-                      <stop stopColor="#f97316"/>
-                      <stop offset="0.5" stopColor="#f43f5e"/>
-                      <stop offset="1" stopColor="#8b5cf6"/>
-                    </linearGradient>
-                  </defs>
-                </svg>
-              </span>
-            </motion.h1>
+              <motion.h1
+                variants={fadeInUp}
+                className="mb-6 max-w-4xl text-5xl font-black uppercase leading-[0.9] md:text-7xl lg:text-8xl"
+              >
+                Know when to push. Know when to recover.
+              </motion.h1>
 
-            <motion.p
-              variants={fadeInUp}
-              className="text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto mb-8"
-            >
-              Your personal AI coach for workouts, dance, and nutrition. Get real-time form feedback, 
-              customized plans, and 24/7 guidance to achieve your fitness goals.
-            </motion.p>
+              <motion.p
+                variants={fadeInUp}
+                className="mb-8 max-w-2xl text-lg text-muted-foreground md:text-xl"
+              >
+                A wearable-inspired AI coach that turns form scorecards, hip-hop timing, calories, recovery, and achievements into one clear next move.
+              </motion.p>
 
-            <motion.div variants={fadeInUp} className="flex flex-wrap justify-center gap-4 mb-12">
+            <motion.div variants={fadeInUp} className="mb-12 flex flex-wrap gap-4">
               {hasProfile ? (
                 <>
                   <Link href="/dashboard">
-                    <Button size="lg" className="bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600 text-white shadow-lg shadow-orange-500/25 h-12 px-8">
+                    <Button size="lg" className="h-12 px-8">
                       Go to Dashboard
                       <ArrowRight className="ml-2 h-5 w-5" />
                     </Button>
@@ -170,7 +149,7 @@ export default function HomePage() {
               ) : (
                 <>
                   <Link href="/onboarding">
-                    <Button size="lg" className="bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600 text-white shadow-lg shadow-orange-500/25 h-12 px-8">
+                    <Button size="lg" className="h-12 px-8">
                       Get Started Free
                       <ArrowRight className="ml-2 h-5 w-5" />
                     </Button>
@@ -188,14 +167,25 @@ export default function HomePage() {
             {/* Stats */}
             <motion.div
               variants={fadeInUp}
-              className="grid grid-cols-2 md:grid-cols-4 gap-6 max-w-2xl mx-auto"
+              className="grid max-w-2xl grid-cols-2 gap-3 md:grid-cols-4"
             >
               {stats.map((stat, i) => (
-                <div key={i} className="text-center">
-                  <div className="text-2xl md:text-3xl font-bold gradient-text">{stat.value}</div>
-                  <div className="text-sm text-muted-foreground">{stat.label}</div>
+                <div key={i} className="rounded-lg border bg-card/70 p-4">
+                  <div className="text-2xl font-black md:text-3xl gradient-text">{stat.value}</div>
+                  <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">{stat.label}</div>
                 </div>
               ))}
+            </motion.div>
+            </div>
+            <motion.div variants={fadeInUp} className="relative mx-auto aspect-square w-full max-w-[420px] rounded-full border border-primary/20 bg-primary/5 p-8 shadow-[0_0_90px_color-mix(in_oklch,var(--primary)_18%,transparent)]">
+              <div className="absolute inset-8 rounded-full border border-accent/20" />
+              <div className="absolute inset-20 rounded-full border border-primary/25" />
+              <div className="flex h-full flex-col items-center justify-center rounded-full border border-border bg-card/80 text-center backdrop-blur">
+                <CircleGauge className="mb-5 h-12 w-12 text-primary" />
+                <p className="text-[10px] font-black uppercase tracking-[0.3em] text-muted-foreground">today readiness</p>
+                <p className="mt-2 text-7xl font-black">86</p>
+                <p className="mt-3 max-w-48 text-sm text-muted-foreground">Technique day. Push quality, not volume.</p>
+              </div>
             </motion.div>
           </motion.div>
         </div>

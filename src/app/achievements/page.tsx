@@ -54,8 +54,8 @@ const rarityByPoints = (points: number) => {
 const rarityStyles = {
   common: { border: "border-zinc-500/20", bar: "from-zinc-400 to-zinc-500", badge: "common" },
   rare: { border: "border-blue-500/20", bar: "from-sky-400 to-blue-500", badge: "rare" },
-  epic: { border: "border-violet-500/20", bar: "from-fuchsia-400 to-violet-500", badge: "epic" },
-  legendary: { border: "border-orange-500/20", bar: "from-amber-400 to-orange-500", badge: "legendary" },
+  epic: { border: "border-cyan-500/20", bar: "from-cyan-300 to-primary", badge: "epic" },
+  legendary: { border: "border-primary/20", bar: "from-primary to-amber-300", badge: "legendary" },
 } as const;
 
 export default function AchievementsPage() {
@@ -133,10 +133,10 @@ export default function AchievementsPage() {
       </motion.div>
 
       <div className="grid gap-4 md:grid-cols-4">
-        <Card className="md:col-span-2 border-amber-500/20 bg-gradient-to-br from-amber-500/10 to-orange-500/10">
+        <Card className="border-primary/20 bg-primary/5 md:col-span-2">
           <CardContent className="pt-6">
             <div className="flex items-center gap-4">
-              <div className="relative flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-amber-500 to-orange-500 text-white">
+              <div className="relative flex h-20 w-20 items-center justify-center rounded-full border border-primary/30 bg-primary/10 text-primary">
                 <Crown className="h-9 w-9" />
                 <span className="absolute -bottom-1 -right-1 flex h-8 w-8 items-center justify-center rounded-full border-2 border-amber-500 bg-background text-sm font-bold text-amber-500">
                   {level}
@@ -166,7 +166,7 @@ export default function AchievementsPage() {
         </Card>
       </div>
 
-      <Card className="border-cyan-500/20 bg-gradient-to-br from-cyan-500/10 to-emerald-500/10">
+      <Card className="border-accent/20 bg-accent/5">
         <CardContent className="grid gap-4 pt-6 md:grid-cols-[1fr_auto] md:items-center">
           {closestAchievement ? (
             <>
