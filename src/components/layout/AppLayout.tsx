@@ -23,6 +23,7 @@ import {
   Activity,
   BatteryCharging,
   Calendar,
+  ClipboardCheck,
   CircleGauge,
   Dumbbell,
   Home,
@@ -46,6 +47,7 @@ import {
 const mainNavItems = [
   { href: "/", label: "Home", icon: Home },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/review-lab", label: "Review Lab", icon: ClipboardCheck },
   { href: "/profiles", label: "Profiles", icon: Users },
   { href: "/workouts", label: "Workouts", icon: Dumbbell },
   { href: "/workout-plans", label: "Plans", icon: Calendar },

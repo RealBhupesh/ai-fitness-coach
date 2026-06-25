@@ -4,6 +4,7 @@ import { isDemoModeEnabled } from "@/lib/env";
 
 const protectedPrefixes = [
   "/dashboard",
+  "/review-lab",
   "/profiles",
   "/coach",
   "/workouts",
