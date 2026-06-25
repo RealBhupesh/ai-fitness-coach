@@ -120,6 +120,13 @@ export default function SignupPage() {
           <Button type="button" variant="outline" className="w-full" disabled={submitting} onClick={handleGoogleSignUp}>
             Continue with Google
           </Button>
+          {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? (
+            <Link href="/sign-up">
+              <Button type="button" variant="outline" className="mt-3 w-full">
+                Continue with Clerk
+              </Button>
+            </Link>
+          ) : null}
           {demoModeEnabled ? (
             <>
               <Button

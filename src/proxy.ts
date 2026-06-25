@@ -4,6 +4,7 @@ import { isDemoModeEnabled } from "@/lib/env";
 
 const protectedPrefixes = [
   "/dashboard",
+  "/profiles",
   "/coach",
   "/workouts",
   "/workout-plans",
@@ -14,7 +15,7 @@ const protectedPrefixes = [
   "/onboarding",
 ];
 
-const SESSION_COOKIE_NAMES = ["better-auth.session_token", "__Secure-better-auth.session_token"];
+const SESSION_COOKIE_NAMES = ["better-auth.session_token", "__Secure-better-auth.session_token", "__session", "__client_uat"];
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -23,7 +24,7 @@ export function proxy(request: NextRequest) {
   const hasDemoSession = isDemoModeEnabled() && Boolean(request.cookies.get("fitcoach_demo")?.value);
   const hasSession = hasRealSession || hasDemoSession;
   const isProtected = protectedPrefixes.some((prefix) => pathname.startsWith(prefix));
-  const isAuthPage = pathname === "/login" || pathname === "/signup";
+  const isAuthPage = pathname === "/login" || pathname === "/signup" || pathname.startsWith("/sign-in") || pathname.startsWith("/sign-up");
 
   if (isProtected && !hasSession) {
     const url = new URL("/login", request.url);

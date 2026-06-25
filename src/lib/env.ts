@@ -48,6 +48,10 @@ export function isDemoModeEnabled() {
   return process.env.NODE_ENV !== "production";
 }
 
+export function isClerkAuthEnabled() {
+  return Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && process.env.CLERK_SECRET_KEY);
+}
+
 export function validateServerEnv() {
   const missing = ["DATABASE_URL", "BETTER_AUTH_SECRET"].filter((key) => !process.env[key]);
   const invalid: string[] = [];
@@ -71,6 +75,15 @@ export function validateServerEnv() {
   }
   if (!process.env.GOOGLE_CLIENT_ID && !process.env.GOOGLE_CLIENT_SECRET) {
     warnings.push("Google OAuth disabled until GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are configured");
+  }
+  if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && !process.env.CLERK_SECRET_KEY) {
+    warnings.push("Clerk disabled until NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY are configured");
+  }
+  if (process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && !process.env.CLERK_SECRET_KEY) {
+    invalid.push("CLERK_SECRET_KEY");
+  }
+  if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && process.env.CLERK_SECRET_KEY) {
+    invalid.push("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY");
   }
 
   return {

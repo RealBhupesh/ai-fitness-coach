@@ -112,6 +112,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
   const handleLogout = async () => {
     clearDemoSession();
+    if (process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
+      router.push("/sign-out");
+      return;
+    }
     if (!demoMode) {
       try {
         await signOut();

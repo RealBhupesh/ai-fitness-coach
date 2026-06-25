@@ -1,7 +1,12 @@
 import { getSessionCookie } from "better-auth/cookies";
+import { currentUser } from "@clerk/nextjs/server";
+import { eq } from "drizzle-orm";
 import { headers } from "next/headers";
 import { NextRequest } from "next/server";
+import { db } from "@/db";
+import { users } from "@/db/schema";
 import { auth } from "@/lib/auth/config";
+import { isClerkAuthEnabled } from "@/lib/env";
 import { hasDemoCookie, buildDemoServerSession } from "@/lib/dummy-auth";
 
 type RequestLike = NextRequest | Request | Headers | undefined;
@@ -19,8 +24,80 @@ function toHeaders(source?: RequestLike): Headers {
   return new Headers();
 }
 
+async function getClerkServerSession() {
+  if (!isClerkAuthEnabled()) {
+    return null;
+  }
+
+  try {
+    const user = await currentUser();
+    if (!user?.id) return null;
+
+    const email = user.primaryEmailAddress?.emailAddress ?? user.emailAddresses[0]?.emailAddress;
+    if (!email) return null;
+
+    const name = user.fullName || user.username || email.split("@")[0] || "FitCoach user";
+    const image = user.imageUrl || null;
+    const existingByEmail = await db.query.users.findFirst({ where: eq(users.email, email) });
+    const now = new Date();
+
+    if (existingByEmail) {
+      await db
+        .update(users)
+        .set({
+          name,
+          image,
+          emailVerified: Boolean(user.primaryEmailAddress?.verification?.status === "verified"),
+          updatedAt: now,
+        })
+        .where(eq(users.id, existingByEmail.id));
+
+      return {
+        session: {
+          id: `clerk:${user.id}`,
+          userId: existingByEmail.id,
+          expiresAt: new Date(now.getTime() + 60 * 60 * 24 * 7 * 1000),
+        },
+        user: {
+          ...existingByEmail,
+          name,
+          image,
+          emailVerified: Boolean(user.primaryEmailAddress?.verification?.status === "verified"),
+        },
+      };
+    }
+
+    const id = `clerk:${user.id}`;
+    const newUser = {
+      id,
+      email,
+      name,
+      image,
+      emailVerified: Boolean(user.primaryEmailAddress?.verification?.status === "verified"),
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    await db.insert(users).values(newUser).onConflictDoNothing();
+
+    return {
+      session: {
+        id,
+        userId: id,
+        expiresAt: new Date(now.getTime() + 60 * 60 * 24 * 7 * 1000),
+      },
+      user: newUser,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function getServerSession(source?: RequestLike) {
   const requestHeaders = source ? toHeaders(source) : new Headers(await headers());
+
+  const clerkSession = await getClerkServerSession();
+  if (clerkSession?.user?.id) return clerkSession;
 
   try {
     const session = await auth.api.getSession({ headers: requestHeaders });
@@ -45,5 +122,5 @@ export async function requireServerSession(source?: RequestLike) {
 
 export function hasSessionCookie(source: RequestLike) {
   const requestHeaders = toHeaders(source);
-  return Boolean(getSessionCookie(requestHeaders));
+  return Boolean(getSessionCookie(requestHeaders) || requestHeaders.get("cookie")?.includes("__session="));
 }

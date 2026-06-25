@@ -3,6 +3,7 @@ import { Archivo, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { AppLayout } from "@/components/layout/AppLayout";
 import ErrorReporter from "@/components/ErrorReporter";
+import { AuthProvider } from "@/components/auth/AuthProvider";
 import { Toaster } from "sonner";
 
 const archivo = Archivo({
@@ -30,18 +31,20 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`${archivo.variable} ${jetbrainsMono.variable} font-sans antialiased`}>
-        <ErrorReporter />
-        <AppLayout>{children}</AppLayout>
-        <Toaster
-          position="top-right"
-          toastOptions={{
-            style: {
-              background: "var(--card)",
-              border: "1px solid var(--border)",
-              color: "var(--foreground)",
-            },
-          }}
-        />
+        <AuthProvider>
+          <ErrorReporter />
+          <AppLayout>{children}</AppLayout>
+          <Toaster
+            position="top-right"
+            toastOptions={{
+              style: {
+                background: "var(--card)",
+                border: "1px solid var(--border)",
+                color: "var(--foreground)",
+              },
+            }}
+          />
+        </AuthProvider>
       </body>
     </html>
   );
