@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useUserProfile, Goal, DietaryPref, ExperienceLevel } from "@/hooks/useUserProfile";
+import type { ProfileType } from "@/lib/app-types";
 import { toast } from "sonner";
 import {
   User,
@@ -66,6 +67,11 @@ export default function SettingsPage() {
   const [heightCm, setHeightCm] = useState<string>(profile?.heightCm?.toString() ?? "");
   const [weightKg, setWeightKg] = useState<string>(profile?.weightKg?.toString() ?? "");
   const [experience, setExperience] = useState<ExperienceLevel>(profile?.experience ?? "beginner");
+  const [profileType, setProfileType] = useState<ProfileType>(profile?.profileType ?? "beginner_rebuild");
+  const [primarySport, setPrimarySport] = useState<string>(profile?.primarySport ?? "");
+  const [trainingStyle, setTrainingStyle] = useState<string>(profile?.trainingStyle ?? "");
+  const [readinessAssumptions, setReadinessAssumptions] = useState<string>(profile?.readinessAssumptions?.join("\n") ?? "");
+  const [coachingConstraints, setCoachingConstraints] = useState<string>(profile?.coachingConstraints?.join("\n") ?? "");
   const [goals, setGoals] = useState<Goal[]>(profile?.goals ?? []);
   const [dietaryPrefs, setDietaryPrefs] = useState<DietaryPref[]>(profile?.dietaryPrefs ?? []);
   const [allergies, setAllergies] = useState<string>(profile?.allergies ?? "");
@@ -90,6 +96,11 @@ export default function SettingsPage() {
       setHeightCm(profile.heightCm?.toString() ?? "");
       setWeightKg(profile.weightKg?.toString() ?? "");
       setExperience(profile.experience ?? "beginner");
+      setProfileType(profile.profileType ?? "beginner_rebuild");
+      setPrimarySport(profile.primarySport ?? "");
+      setTrainingStyle(profile.trainingStyle ?? "");
+      setReadinessAssumptions(profile.readinessAssumptions?.join("\n") ?? "");
+      setCoachingConstraints(profile.coachingConstraints?.join("\n") ?? "");
       setGoals(profile.goals ?? []);
       setDietaryPrefs(profile.dietaryPrefs ?? []);
       setAllergies(profile.allergies ?? "");
@@ -123,6 +134,12 @@ export default function SettingsPage() {
       heightCm: heightCm ? Number(heightCm) : undefined,
       weightKg: weightKg ? Number(weightKg) : undefined,
       experience,
+      profileType,
+      primarySport: primarySport.trim() || undefined,
+      trainingStyle: trainingStyle.trim() || undefined,
+      readinessAssumptions: readinessAssumptions.split("\n").map((item) => item.trim()).filter(Boolean),
+      coachingConstraints: coachingConstraints.split("\n").map((item) => item.trim()).filter(Boolean),
+      baselineMetrics: profile?.baselineMetrics,
       goals,
       dietaryPrefs,
       allergies: allergies || undefined,
@@ -308,6 +325,71 @@ export default function SettingsPage() {
                         <SelectItem value="imperial">Imperial (lbs, ft)</SelectItem>
                       </SelectContent>
                     </Select>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.15 }}
+          >
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Shield className="h-5 w-5" />
+                  Coach Profile Intelligence
+                </CardTitle>
+                <CardDescription>These fields ground AI coaching in explicit assumptions and limits.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <Label>Profile Type</Label>
+                    <Select value={profileType} onValueChange={(value: ProfileType) => setProfileType(value)}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="beginner_rebuild">Beginner rebuild</SelectItem>
+                        <SelectItem value="strength_focused">Strength focused</SelectItem>
+                        <SelectItem value="dance_athlete">Dance athlete</SelectItem>
+                        <SelectItem value="fat_loss">Fat loss</SelectItem>
+                        <SelectItem value="mobility_rehab">Mobility rebuild</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="primarySport">Primary Sport</Label>
+                    <Input id="primarySport" value={primarySport} onChange={(e) => setPrimarySport(e.target.value)} placeholder="Strength, dance, mobility..." />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="trainingStyle">Training Style</Label>
+                    <Input id="trainingStyle" value={trainingStyle} onChange={(e) => setTrainingStyle(e.target.value)} placeholder="Strict coach, tutorial follow-along..." />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="readinessAssumptions">Assumptions, one per line</Label>
+                    <textarea
+                      id="readinessAssumptions"
+                      className="min-h-28 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={readinessAssumptions}
+                      onChange={(e) => setReadinessAssumptions(e.target.value)}
+                      placeholder={"Laptop webcam available\nNeeds short sessions\nRecovery score estimated initially"}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="coachingConstraints">AI Coach Constraints, one per line</Label>
+                    <textarea
+                      id="coachingConstraints"
+                      className="min-h-28 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={coachingConstraints}
+                      onChange={(e) => setCoachingConstraints(e.target.value)}
+                      placeholder={"No medical diagnosis\nPause on pain\nDo not score when camera confidence is low"}
+                    />
                   </div>
                 </div>
               </CardContent>

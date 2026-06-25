@@ -10,6 +10,7 @@ export type DietaryPref =
 
 export type CoachingTone = "strict" | "friendly" | "motivational";
 export type BudgetTier = "low" | "medium" | "high";
+export type ProfileType = "beginner_rebuild" | "strength_focused" | "dance_athlete" | "fat_loss" | "mobility_rehab";
 
 export interface AppUserProfile {
   userId: string;
@@ -22,6 +23,18 @@ export interface AppUserProfile {
   targetWeightKg?: number;
   experience: ExperienceLevel;
   goals: Goal[];
+  profileType?: ProfileType;
+  primarySport?: string;
+  trainingStyle?: string;
+  readinessAssumptions: string[];
+  coachingConstraints: string[];
+  baselineMetrics?: {
+    readinessScore?: number;
+    mobilityScore?: number;
+    strengthScore?: number;
+    danceTimingScore?: number;
+    postureConfidence?: number;
+  };
   dietaryPrefs: DietaryPref[];
   injuries: string[];
   painPoints: string[];
@@ -35,6 +48,19 @@ export interface AppUserProfile {
   sleepHours?: number;
   onboardingCompleted: boolean;
   lastUpdated?: string;
+}
+
+export interface ProfilePersona {
+  id: string;
+  title: string;
+  profileType: ProfileType;
+  name: string;
+  summary: string;
+  goals: Goal[];
+  assumptions: string[];
+  coachingPlan: string[];
+  riskFlags: string[];
+  sampleProfile: AppUserProfile;
 }
 
 export interface DashboardSummary {

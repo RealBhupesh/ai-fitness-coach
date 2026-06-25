@@ -57,6 +57,25 @@ function LoginPageInner() {
     }
   };
 
+  const handleGoogleSignIn = async () => {
+    setSubmitting(true);
+    setError(null);
+    try {
+      const result = await signIn.social({
+        provider: "google",
+        callbackURL: searchParams.get("next") || "/dashboard",
+      });
+
+      if ((result as any)?.error) {
+        setError((result as any).error.message || "Google sign-in is not configured yet");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Google sign-in is not configured yet");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <div className="performance-shell flex min-h-screen items-center justify-center p-4">
       <div className="grid w-full max-w-5xl gap-6 lg:grid-cols-[1fr_430px] lg:items-center">
@@ -110,15 +129,18 @@ function LoginPageInner() {
               {submitting ? "Signing in..." : "Sign in"}
             </Button>
           </form>
+          <div className="relative my-4">
+            <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
+            <div className="relative flex justify-center text-xs uppercase"><span className="bg-card px-2 text-muted-foreground">or</span></div>
+          </div>
+          <Button type="button" variant="outline" className="w-full" disabled={submitting} onClick={handleGoogleSignIn}>
+            Continue with Google
+          </Button>
           {demoModeEnabled ? (
             <>
-              <div className="relative my-4">
-                <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
-                <div className="relative flex justify-center text-xs uppercase"><span className="bg-card px-2 text-muted-foreground">or</span></div>
-              </div>
               <Button
                 variant="outline"
-                className="w-full"
+                className="mt-3 w-full"
                 onClick={() => {
                   createDemoSession();
                   router.push(searchParams.get("next") || "/dashboard");

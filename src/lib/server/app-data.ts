@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import type { AppUserProfile, DashboardSummary, Goal } from "@/lib/app-types";
+import type { AppUserProfile, DashboardSummary, Goal, ProfilePersona } from "@/lib/app-types";
 import { db } from "@/db";
 import { isDemoUser } from "@/lib/dummy-auth";
 import {
@@ -76,6 +76,12 @@ export function mapProfileToApp(user: { id: string; email: string; name: string 
     targetWeightKg: profile?.targetWeight ?? undefined,
     experience: (profile?.fitnessLevel as AppUserProfile["experience"]) ?? "beginner",
     goals: parseJsonArray<Goal>(profile?.goals, []),
+    profileType: (profile?.profileType as AppUserProfile["profileType"]) ?? undefined,
+    primarySport: profile?.primarySport ?? undefined,
+    trainingStyle: profile?.trainingStyle ?? undefined,
+    readinessAssumptions: parseJsonArray<string>(profile?.readinessAssumptions, []),
+    coachingConstraints: parseJsonArray<string>(profile?.coachingConstraints, []),
+    baselineMetrics: parseJsonObject<AppUserProfile["baselineMetrics"]>(profile?.baselineMetrics, undefined),
     dietaryPrefs: parseJsonArray<AppUserProfile["dietaryPrefs"][number]>(profile?.dietaryPreferences, []),
     injuries: parseJsonArray<string>(profile?.injuries, []),
     painPoints: parseJsonArray<string>(profile?.painPoints, []),
@@ -110,6 +116,12 @@ export function toProfileDbInput(profile: Partial<AppUserProfile>) {
     targetWeight: profile.targetWeightKg,
     fitnessLevel: profile.experience,
     goals: profile.goals ? toJson(profile.goals) : undefined,
+    profileType: profile.profileType,
+    primarySport: profile.primarySport,
+    trainingStyle: profile.trainingStyle,
+    readinessAssumptions: profile.readinessAssumptions ? toJson(profile.readinessAssumptions) : undefined,
+    coachingConstraints: profile.coachingConstraints ? toJson(profile.coachingConstraints) : undefined,
+    baselineMetrics: profile.baselineMetrics ? toJson(profile.baselineMetrics) : undefined,
     dietaryPreferences: profile.dietaryPrefs ? toJson(profile.dietaryPrefs) : undefined,
     injuries: profile.injuries ? toJson(profile.injuries) : undefined,
     painPoints: profile.painPoints ? toJson(profile.painPoints) : undefined,
@@ -122,6 +134,114 @@ export function toProfileDbInput(profile: Partial<AppUserProfile>) {
     coachingTone: profile.coachingTone,
     sleepHours: profile.sleepHours,
     onboardingCompleted: profile.onboardingCompleted,
+  };
+}
+
+export const PROFILE_PERSONAS: ProfilePersona[] = [
+  {
+    id: "persona-baseline-beginner",
+    title: "Beginner Rebuild",
+    profileType: "beginner_rebuild",
+    name: "Aarav Baseline",
+    summary: "New lifter rebuilding consistency with short sessions, conservative load, and high camera-guided form feedback.",
+    goals: ["general_fitness", "mobility"],
+    assumptions: ["Three training days per week", "Low equipment access", "Needs confidence-building cues before intensity"],
+    coachingPlan: ["Start with 20 minute full-body sessions", "Prioritize squat depth, plank line, and shoulder control", "Progress only after two clean sessions above 80 form score"],
+    riskFlags: ["Avoid medical diagnosis", "Pause on sharp pain reports", "Use low-impact alternatives when fatigue rises"],
+    sampleProfile: {
+      userId: "sample-beginner",
+      name: "Aarav Baseline",
+      experience: "beginner",
+      goals: ["general_fitness", "mobility"],
+      profileType: "beginner_rebuild",
+      primarySport: "General fitness",
+      trainingStyle: "Short coached fundamentals",
+      readinessAssumptions: ["Likely inconsistent routine", "Needs simple cues", "Recovery score estimated until enough sessions exist"],
+      coachingConstraints: ["No medical claims", "No advanced plyometrics in first week"],
+      baselineMetrics: { readinessScore: 66, mobilityScore: 58, strengthScore: 46, postureConfidence: 72 },
+      dietaryPrefs: ["omnivore"],
+      injuries: [],
+      painPoints: ["Lower back tightness"],
+      equipmentAccess: ["Mat", "Chair"],
+      workoutFrequency: 3,
+      workoutDuration: 20,
+      coachingTone: "friendly",
+      onboardingCompleted: true,
+    },
+  },
+  {
+    id: "persona-strength",
+    title: "Strength Focused",
+    profileType: "strength_focused",
+    name: "Maya Strength",
+    summary: "Intermediate athlete using strict scoring to improve squat, curl, and weekly load consistency.",
+    goals: ["muscle_gain", "general_fitness"],
+    assumptions: ["Four sessions per week", "Has dumbbells", "Wants direct trainer-style correction"],
+    coachingPlan: ["Track form trend per exercise", "Use stricter tempo targets", "Recommend recovery when weekly load spikes"],
+    riskFlags: ["Watch knee valgus trend", "Flag low landmark confidence before form claims"],
+    sampleProfile: {
+      userId: "sample-strength",
+      name: "Maya Strength",
+      experience: "intermediate",
+      goals: ["muscle_gain", "general_fitness"],
+      profileType: "strength_focused",
+      primarySport: "Strength training",
+      trainingStyle: "Strict progressive overload",
+      readinessAssumptions: ["Good adherence", "Moderate fatigue tolerance", "Needs measurable rep-by-rep evidence"],
+      coachingConstraints: ["Keep feedback strict but non-medical", "Do not increase load after failed safety score"],
+      baselineMetrics: { readinessScore: 78, mobilityScore: 70, strengthScore: 74, postureConfidence: 84 },
+      dietaryPrefs: ["vegetarian"],
+      injuries: [],
+      painPoints: ["Knee cave during fatigue"],
+      equipmentAccess: ["Dumbbells", "Resistance bands", "Bench"],
+      workoutFrequency: 4,
+      workoutDuration: 45,
+      coachingTone: "strict",
+      onboardingCompleted: true,
+    },
+  },
+  {
+    id: "persona-dance",
+    title: "Dance Athlete",
+    profileType: "dance_athlete",
+    name: "Riya Groove",
+    summary: "Hip-hop learner combining tutorial skeleton follow-along, rhythm scoring, posture correction, and confidence tracking.",
+    goals: ["dance_skill", "endurance"],
+    assumptions: ["Laptop webcam at chest height", "Music timing matters as much as posture", "Learner needs phrase-level feedback"],
+    coachingPlan: ["Compare against tutorial skeleton checkpoints", "Score timing, groove, arm lines, and lower-body bounce", "Use short loops before full routine attempts"],
+    riskFlags: ["Avoid high-impact cues when landing control drops", "Camera confidence gates override scoring"],
+    sampleProfile: {
+      userId: "sample-dance",
+      name: "Riya Groove",
+      experience: "beginner",
+      goals: ["dance_skill", "endurance"],
+      profileType: "dance_athlete",
+      primarySport: "Hip-hop dance",
+      trainingStyle: "Tutorial skeleton follow-along",
+      readinessAssumptions: ["Needs visual imitation", "Timing improves with repeated phrase loops", "Upper-body angles may be noisy on small webcams"],
+      coachingConstraints: ["Keep feedback actionable in one cue", "Do not judge style when skeleton confidence is low"],
+      baselineMetrics: { readinessScore: 72, mobilityScore: 76, danceTimingScore: 52, postureConfidence: 68 },
+      dietaryPrefs: ["omnivore"],
+      injuries: [],
+      painPoints: [],
+      equipmentAccess: ["Laptop webcam", "Open floor"],
+      workoutFrequency: 5,
+      workoutDuration: 25,
+      coachingTone: "motivational",
+      onboardingCompleted: true,
+    },
+  },
+];
+
+export function getProfilePersonas(currentProfile: AppUserProfile | null) {
+  return {
+    currentProfile,
+    personas: PROFILE_PERSONAS,
+    assumptions: [
+      "Sample profiles are product assumptions used for demos, QA, and coach calibration.",
+      "Real users should complete onboarding before personalization is treated as reliable.",
+      "AI coach guidance is not medical diagnosis and should be constrained by measured evidence.",
+    ],
   };
 }
 

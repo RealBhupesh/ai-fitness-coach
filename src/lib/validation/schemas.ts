@@ -27,6 +27,20 @@ export const profileInputSchema = z.object({
   targetWeightKg: z.number().min(20).max(400).optional(),
   experience: z.enum(["beginner", "intermediate", "advanced"]).optional(),
   goals: z.array(goalSchema).max(6).optional(),
+  profileType: z.enum(["beginner_rebuild", "strength_focused", "dance_athlete", "fat_loss", "mobility_rehab"]).optional(),
+  primarySport: z.string().min(1).max(120).optional(),
+  trainingStyle: z.string().min(1).max(160).optional(),
+  readinessAssumptions: z.array(z.string().min(1).max(180)).max(12).optional(),
+  coachingConstraints: z.array(z.string().min(1).max(180)).max(12).optional(),
+  baselineMetrics: z
+    .object({
+      readinessScore: z.number().min(0).max(100).optional(),
+      mobilityScore: z.number().min(0).max(100).optional(),
+      strengthScore: z.number().min(0).max(100).optional(),
+      danceTimingScore: z.number().min(0).max(100).optional(),
+      postureConfidence: z.number().min(0).max(100).optional(),
+    })
+    .optional(),
   dietaryPrefs: z.array(dietaryPrefSchema).max(6).optional(),
   injuries: z.array(z.string().min(1).max(80)).max(20).optional(),
   painPoints: z.array(z.string().min(1).max(80)).max(20).optional(),

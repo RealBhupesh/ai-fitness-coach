@@ -38,6 +38,7 @@ import {
   TrendingUp,
   Trophy,
   User,
+  Users,
   Utensils,
   Zap,
 } from "lucide-react";
@@ -45,6 +46,7 @@ import {
 const mainNavItems = [
   { href: "/", label: "Home", icon: Home },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/profiles", label: "Profiles", icon: Users },
   { href: "/workouts", label: "Workouts", icon: Dumbbell },
   { href: "/workout-plans", label: "Plans", icon: Calendar },
   { href: "/nutrition", label: "Nutrition", icon: Utensils },

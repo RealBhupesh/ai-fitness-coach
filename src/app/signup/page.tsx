@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { signUp } from "@/lib/auth/client";
+import { signIn, signUp } from "@/lib/auth/client";
 import { createDemoSession } from "@/lib/dummy-auth";
 import { isDemoModeEnabled } from "@/lib/env";
 import { Button } from "@/components/ui/button";
@@ -42,6 +42,25 @@ export default function SignupPage() {
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to create account");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleGoogleSignUp = async () => {
+    setSubmitting(true);
+    setError(null);
+    try {
+      const result = await signIn.social({
+        provider: "google",
+        callbackURL: "/onboarding",
+      });
+
+      if ((result as any)?.error) {
+        setError((result as any).error.message || "Google sign-up is not configured yet");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Google sign-up is not configured yet");
     } finally {
       setSubmitting(false);
     }
@@ -94,15 +113,18 @@ export default function SignupPage() {
               {submitting ? "Creating account..." : "Create account"}
             </Button>
           </form>
+          <div className="relative my-4">
+            <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
+            <div className="relative flex justify-center text-xs uppercase"><span className="bg-card px-2 text-muted-foreground">or</span></div>
+          </div>
+          <Button type="button" variant="outline" className="w-full" disabled={submitting} onClick={handleGoogleSignUp}>
+            Continue with Google
+          </Button>
           {demoModeEnabled ? (
             <>
-              <div className="relative my-4">
-                <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
-                <div className="relative flex justify-center text-xs uppercase"><span className="bg-card px-2 text-muted-foreground">or</span></div>
-              </div>
               <Button
                 variant="outline"
-                className="w-full"
+                className="mt-3 w-full"
                 onClick={() => {
                   createDemoSession();
                   router.push("/dashboard");

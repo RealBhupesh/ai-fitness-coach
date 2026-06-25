@@ -18,6 +18,8 @@ export function useUserProfile() {
       name: user.name ?? "Athlete",
       experience: "beginner",
       goals: [],
+      readinessAssumptions: [],
+      coachingConstraints: [],
       dietaryPrefs: [],
       injuries: [],
       painPoints: [],

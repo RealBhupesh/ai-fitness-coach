@@ -51,6 +51,7 @@ export function isDemoModeEnabled() {
 export function validateServerEnv() {
   const missing = ["DATABASE_URL", "BETTER_AUTH_SECRET"].filter((key) => !process.env[key]);
   const invalid: string[] = [];
+  const warnings: string[] = [];
 
   if (
     process.env.NODE_ENV === "production" &&
@@ -62,10 +63,21 @@ export function validateServerEnv() {
     invalid.push("BETTER_AUTH_SECRET");
   }
 
+  if (process.env.GOOGLE_CLIENT_ID && !process.env.GOOGLE_CLIENT_SECRET) {
+    invalid.push("GOOGLE_CLIENT_SECRET");
+  }
+  if (!process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+    invalid.push("GOOGLE_CLIENT_ID");
+  }
+  if (!process.env.GOOGLE_CLIENT_ID && !process.env.GOOGLE_CLIENT_SECRET) {
+    warnings.push("Google OAuth disabled until GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are configured");
+  }
+
   return {
     ok: missing.length === 0 && invalid.length === 0,
     missing,
     invalid,
+    warnings,
   };
 }
 
