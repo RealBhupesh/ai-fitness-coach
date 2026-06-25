@@ -62,3 +62,47 @@ Run this before calling the live stack release-ready:
 - `npm run build`
 - real camera QA on the target hardware class
 - fixture added for every regression found during camera QA
+
+## Research-grade posture benchmark lab
+
+Use the benchmark lab before claiming the posture coach is state-of-the-art.
+
+1. Build a labeled benchmark fixture from public MediaPipe landmark rows or local laptop-webcam captures.
+2. Run:
+
+```bash
+npm run ml:benchmark -- --input fixtures/posture-benchmark.json --output reports/posture-benchmark.md
+```
+
+3. Review:
+- accuracy and macro F1
+- confusion matrix by mistake class
+- average inference latency
+- dataset provenance and limitations
+
+Benchmark fixture shape:
+
+```json
+{
+  "manifest": {
+    "name": "Public squat benchmark",
+    "sources": ["Kaggle MediaPipe 33-landmark exercise rows"],
+    "sampleCount": 2,
+    "subjectCount": 1,
+    "captureDevice": "public dataset mixed cameras",
+    "labelProtocol": "rubric labels mapped to posture mistake classes"
+  },
+  "samples": [
+    {
+      "id": "sample-1",
+      "exerciseId": "squat",
+      "expected": "knee_collapse",
+      "frames": [
+        { "timestampMs": 0, "landmarks": [] }
+      ]
+    }
+  ]
+}
+```
+
+Limit: public-data results are research evidence only. Local laptop-webcam validation is still required, and this app must not be described as a medical device.

@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { progressTracking } from "@/db/schema";
 import { requireServerSession } from "@/lib/auth/session";
 import { isDemoUser } from "@/lib/dummy-auth";
+import { guardMutationRequest, getRequestIp } from "@/lib/security/request-guard";
 import { parseJsonObject, toJson } from "@/lib/utils/json";
 
 function clampNumber(value: unknown, fallback: number, min: number, max: number) {
@@ -66,6 +67,16 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const session = await requireServerSession(request);
+    const guard = guardMutationRequest(request, {
+      bucket: "recovery-checkin",
+      key: `${session.user.id}:${getRequestIp(request)}`,
+      limit: 20,
+      windowMs: 60_000,
+    });
+    if (guard) {
+      return guard;
+    }
+
     const body = await request.json().catch(() => ({}));
     const payload = recoveryPayload(body && typeof body === "object" ? body : {});
 

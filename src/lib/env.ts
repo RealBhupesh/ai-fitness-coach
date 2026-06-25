@@ -33,10 +33,47 @@ export function getTrustedOrigins() {
   );
 }
 
+function flagEnabled(value: string | undefined) {
+  return /^(1|true|yes|on)$/i.test(value ?? "");
+}
+
+function flagDisabled(value: string | undefined) {
+  return /^(0|false|no|off)$/i.test(value ?? "");
+}
+
+export function isDemoModeEnabled() {
+  const explicit = process.env.NEXT_PUBLIC_ENABLE_DEMO_MODE ?? process.env.ENABLE_DEMO_MODE;
+  if (flagEnabled(explicit)) return true;
+  if (flagDisabled(explicit)) return false;
+  return process.env.NODE_ENV !== "production";
+}
+
 export function validateServerEnv() {
   const missing = ["DATABASE_URL", "BETTER_AUTH_SECRET"].filter((key) => !process.env[key]);
+  const invalid: string[] = [];
+
+  if (
+    process.env.NODE_ENV === "production" &&
+    (!process.env.BETTER_AUTH_SECRET ||
+      process.env.BETTER_AUTH_SECRET === "your-secret-key-change-in-production" ||
+      process.env.BETTER_AUTH_SECRET === "replace-with-a-long-random-secret" ||
+      process.env.BETTER_AUTH_SECRET.length < 32)
+  ) {
+    invalid.push("BETTER_AUTH_SECRET");
+  }
+
   return {
-    ok: missing.length === 0,
+    ok: missing.length === 0 && invalid.length === 0,
     missing,
+    invalid,
   };
+}
+
+export function describeServerEnvState(state = validateServerEnv()) {
+  const problems = [
+    state.missing.length > 0 ? `missing: ${state.missing.join(", ")}` : "",
+    state.invalid.length > 0 ? `invalid: ${state.invalid.join(", ")}` : "",
+  ].filter(Boolean);
+
+  return problems.length > 0 ? problems.join("; ") : "configured";
 }

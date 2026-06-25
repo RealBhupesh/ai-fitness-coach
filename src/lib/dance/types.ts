@@ -39,6 +39,19 @@ export type DanceRoutinePack = {
   thumbnailUrl: string;
   checkpoints: Array<{ timeMs: number; cue: string; target?: string }>;
   segments: DanceRoutineSegment[];
+  tutorial?: DanceTutorialStep[];
+};
+
+export type DanceTutorialStep = {
+  id: string;
+  segmentId: string;
+  order: number;
+  title: string;
+  count: string;
+  teachingCue: string;
+  practiceCue: string;
+  commonMistake: string;
+  correction: string;
 };
 
 export type DanceMetricKey =
@@ -72,4 +85,53 @@ export type DanceComparison = {
   primaryIssue?: string;
   reliability: number;
   notes: string[];
+};
+
+export type DanceSkeletonPointName =
+  | DanceRoutineTargetPoint
+  | "leftElbow"
+  | "rightElbow"
+  | "leftAnkle"
+  | "rightAnkle";
+
+export type DanceReferenceSkeleton = {
+  segmentId: string;
+  label: string;
+  cue: string;
+  points: Record<DanceSkeletonPointName, { x: number; y: number; visible: boolean }>;
+  connections: Array<[DanceSkeletonPointName, DanceSkeletonPointName]>;
+};
+
+export type DanceAiGuidanceRequest = {
+  instruction: string;
+  grounding: {
+    claim: "AI dance coach guidance";
+    style: "hip_hop";
+    routineId: string;
+    segmentId: string;
+    segmentLabel: string;
+    tutorialStep: string;
+    count: string;
+    score: number;
+    reliability: number;
+    primaryIssue?: string;
+    allowedClaims: "not_medical_device";
+    measuredMetrics: Record<DanceMetricKey, DanceMetricGrade>;
+    referenceCue: string;
+    correction: string;
+  };
+};
+
+export type DanceTrainingFrameResult = {
+  routineId: string;
+  style: "hip_hop";
+  elapsedMs: number;
+  segment: DanceRoutineSegment;
+  tutorialStep: DanceTutorialStep;
+  referenceSkeleton: DanceReferenceSkeleton;
+  comparison: DanceComparison | null;
+  score: number;
+  reliability: number;
+  primaryCorrection: string;
+  aiGuidance: DanceAiGuidanceRequest;
 };

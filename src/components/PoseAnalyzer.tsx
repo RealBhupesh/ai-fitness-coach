@@ -13,8 +13,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Progress } from "@/components/ui/progress";
 import { createCameraController, getCameraProfile } from "@/lib/camera/controller";
 import { buildUnreliableCameraGuidance } from "@/lib/camera/guidance";
-import { compareDanceFrame } from "@/lib/dance/comparator";
-import type { DanceComparison, DanceRoutinePack } from "@/lib/dance/types";
+import { evaluateHipHopTrainingFrame } from "@/lib/dance/training-engine";
+import type { DanceComparison, DanceRoutinePack, DanceTrainingFrameResult } from "@/lib/dance/types";
 import { selectFeedbackCue } from "@/lib/feedback/cues";
 import { advanceFeedbackState, buildIssueSignature, createFeedbackState, type CoachLevel, type FeedbackCue } from "@/lib/feedback/state";
 import { createVoiceFeedbackController } from "@/lib/feedback/voice";
@@ -217,6 +217,7 @@ function normalizeDanceRoutine(raw: any): DanceRoutinePack | null {
     thumbnailUrl: typeof raw.thumbnailUrl === "string" ? raw.thumbnailUrl : "",
     checkpoints: checkpoints.filter((item: any) => item && typeof item.timeMs === "number" && typeof item.cue === "string").sort((a: any, b: any) => a.timeMs - b.timeMs),
     segments: Array.isArray(raw.segments) ? raw.segments : [],
+    tutorial: Array.isArray(raw.tutorial) ? raw.tutorial : [],
   };
 }
 
@@ -235,6 +236,40 @@ function getActiveDanceCheckpoint(routine: DanceRoutinePack | null, elapsedMs: n
     }
   }
   return { step: active, index };
+}
+
+function DanceCoachSkeleton({ training }: { training: DanceTrainingFrameResult }) {
+  const skeleton = training.referenceSkeleton;
+  return (
+    <div className="rounded-2xl border border-fuchsia-500/20 bg-fuchsia-500/10 p-4">
+      <div className="grid gap-4 md:grid-cols-[160px_1fr] md:items-center">
+        <div className="rounded-xl border border-zinc-800 bg-zinc-950/80 p-3">
+          <svg viewBox="0 0 100 100" className="h-36 w-full">
+            {skeleton.connections.map(([from, to]) => {
+              const start = skeleton.points[from];
+              const end = skeleton.points[to];
+              return <line key={`${from}-${to}`} x1={start.x} y1={start.y} x2={end.x} y2={end.y} stroke="rgb(217 70 239)" strokeWidth="2.2" strokeLinecap="round" opacity="0.75" />;
+            })}
+            {Object.entries(skeleton.points).map(([name, point]) => (
+              <circle key={name} cx={point.x} cy={point.y} r={name.includes("Wrist") ? 3.2 : 2.7} fill={name.includes("Wrist") ? "rgb(34 211 238)" : "rgb(244 244 245)"} opacity={point.visible ? 1 : 0.35} />
+            ))}
+          </svg>
+        </div>
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge className="bg-fuchsia-500/15 text-fuchsia-200">Count {training.tutorialStep.count}</Badge>
+            <Badge variant="outline" className="border-zinc-700 text-zinc-300">{training.segment.label}</Badge>
+          </div>
+          <p className="mt-3 text-sm font-medium text-zinc-100">{training.tutorialStep.teachingCue}</p>
+          <p className="mt-2 text-sm text-zinc-400">{training.tutorialStep.practiceCue}</p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <p className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3 text-xs text-zinc-400">Common miss: {training.tutorialStep.commonMistake}</p>
+            <p className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-xs text-emerald-100">Fix: {training.primaryCorrection}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function scorecardLabels(exerciseId: ExerciseId) {
@@ -869,6 +904,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   const [postSessionAgent, setPostSessionAgent] = useState<CoachAgentReport | null>(null);
   const [danceRoutine, setDanceRoutine] = useState<DanceRoutinePack | null>(null);
   const [danceComparison, setDanceComparison] = useState<DanceComparison | null>(null);
+  const [danceTraining, setDanceTraining] = useState<DanceTrainingFrameResult | null>(null);
   const [danceSegmentBreakdown, setDanceSegmentBreakdown] = useState<Array<{ id: string; label: string; overall: number; timing: number; transition: number }>>([]);
   const [topMistakes, setTopMistakes] = useState<TopMistake[]>([]);
   const [correctivePlan, setCorrectivePlan] = useState<CorrectiveBlock[]>([]);
@@ -1065,6 +1101,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     setSummaryPractice([]);
     setTechniqueScorecard(null);
     setDanceComparison(null);
+    setDanceTraining(null);
     setDanceSegmentBreakdown([]);
     setTopMistakes([]);
     setCorrectivePlan([]);
@@ -1421,7 +1458,9 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     analysisRef.current = resolved;
 
     if (currentId === "dance_basic" && danceRoutineRef.current?.segments?.length) {
-      const comparison = compareDanceFrame({ landmarks: trackingFrame.smoothedLandmarks, routine: danceRoutineRef.current, elapsedMs, analysis: resolved });
+      const training = evaluateHipHopTrainingFrame({ landmarks: trackingFrame.smoothedLandmarks, routine: danceRoutineRef.current, elapsedMs, analysis: resolved });
+      const comparison = training?.comparison ?? null;
+      setDanceTraining(training);
       setDanceComparison(comparison);
       if (comparison) {
         setTechniqueScorecard({
@@ -1437,6 +1476,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
         danceSegmentRef.current[comparison.segment.id] = bucket;
       }
     } else {
+      setDanceTraining(null);
       setDanceComparison(null);
     }
 
@@ -1781,6 +1821,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       },
     });
     setDanceSegmentBreakdown([{ id: "demo-phrase", label: "Starter phrase", overall: 75, timing: 72, transition: 75 }]);
+    setDanceTraining(null);
     setSummary("Demo hip-hop fallback loaded with realistic phrase timing, groove bounce, and transition evidence.");
     setSummaryInsights(["Shape was readable, but timing drifted late on the main shoulder hit.", "Reliability was high enough for review, but this was demo evidence."]);
     setSummaryPractice(["Repeat the starter groove and count out loud through the first phrase."]);
@@ -1855,6 +1896,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     if (mode !== "dance") {
       setDanceRoutine(null);
       setDanceComparison(null);
+      setDanceTraining(null);
       return;
     }
 
@@ -1869,9 +1911,11 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
           return;
         }
         setDanceRoutine(null);
+        setDanceTraining(null);
       } catch {
         if (!cancelled) {
           setDanceRoutine(null);
+          setDanceTraining(null);
         }
       }
     };
@@ -2403,7 +2447,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                 <CardDescription className="text-zinc-400">
                   {exerciseId === "bicep_curl"
                     ? `${coachLevel[0].toUpperCase()}${coachLevel.slice(1)} curl coaching: ${coachLevelDetail}`
-                    : "Safety overrides everything else. The coach only speaks when the issue is stable enough to matter."}
+                    : "Research-grade posture guidance: safety and camera confidence gate every cue. This is not a medical device."}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -2467,7 +2511,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                     <Mic className="h-4 w-4 text-cyan-300" />
                     <p className="text-sm font-medium text-zinc-200">AI refinement {coachSource ? `(${coachSource})` : ""}</p>
                   </div>
-                  <p className="mt-2 text-sm text-zinc-300">{coachLine || "The grounded rule engine is active. AI refinement appears on meaningful changes and post-set summaries."}</p>
+                  <p className="mt-2 text-sm text-zinc-300">{coachLine || "The grounded rule + ML evidence layer is active. AI refinement appears on meaningful changes and post-set summaries, without medical diagnosis."}</p>
                 </div>
               </CardContent>
             </Card>
@@ -2475,7 +2519,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
             <Card className="border-zinc-800 bg-zinc-950/70 text-zinc-100">
               <CardHeader>
                 <CardTitle>Calibration and tracking</CardTitle>
-                <CardDescription className="text-zinc-400">Rep counting and posture judgments only run when frame quality is ready.</CardDescription>
+                <CardDescription className="text-zinc-400">Rep counting and posture judgments only run when frame quality is ready. Guidance is coach-style feedback, not clinical diagnosis.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -2618,7 +2662,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
             <Card className="border-zinc-800 bg-zinc-950/70 text-zinc-100">
               <CardHeader>
                 <CardTitle>Score breakdown</CardTitle>
-                <CardDescription className="text-zinc-400">The live score is composed from deterministic movement metrics, not LLM guesses.</CardDescription>
+                <CardDescription className="text-zinc-400">The live score combines measured movement metrics with research-grade ML evidence. It is not a medical-device assessment.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -2833,6 +2877,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                     </div>
                     <p className="mt-1 text-sm text-zinc-400">{activeDanceCheckpoint?.step.cue ?? "Waiting for the first phrase."}</p>
                   </div>
+                  {danceTraining ? <DanceCoachSkeleton training={danceTraining} /> : null}
                   {danceComparison ? (
                     <>
                       <div className="grid gap-3 sm:grid-cols-4">

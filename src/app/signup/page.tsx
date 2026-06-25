@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { signUp } from "@/lib/auth/client";
 import { createDemoSession } from "@/lib/dummy-auth";
+import { isDemoModeEnabled } from "@/lib/env";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -18,6 +19,7 @@ export default function SignupPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const demoModeEnabled = isDemoModeEnabled();
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -70,7 +72,7 @@ export default function SignupPage() {
           </div>
           <div className="text-center">
             <CardTitle className="text-2xl font-black uppercase">Create your FitCoach AI account</CardTitle>
-            <CardDescription>Start with a real account or use demo mode to test the app without creating one.</CardDescription>
+            <CardDescription>{demoModeEnabled ? "Start with a real account or use demo mode to test the app without creating one." : "Start with a real account to use the production app."}</CardDescription>
           </div>
         </CardHeader>
         <CardContent>
@@ -92,21 +94,25 @@ export default function SignupPage() {
               {submitting ? "Creating account..." : "Create account"}
             </Button>
           </form>
-          <div className="relative my-4">
-            <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
-            <div className="relative flex justify-center text-xs uppercase"><span className="bg-card px-2 text-muted-foreground">or</span></div>
-          </div>
-          <Button
-            variant="outline"
-            className="w-full"
-            onClick={() => {
-              createDemoSession();
-              router.push("/dashboard");
-              router.refresh();
-            }}
-          >
-            Continue as Demo User
-          </Button>
+          {demoModeEnabled ? (
+            <>
+              <div className="relative my-4">
+                <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
+                <div className="relative flex justify-center text-xs uppercase"><span className="bg-card px-2 text-muted-foreground">or</span></div>
+              </div>
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => {
+                  createDemoSession();
+                  router.push("/dashboard");
+                  router.refresh();
+                }}
+              >
+                Continue as Demo User
+              </Button>
+            </>
+          ) : null}
           <p className="mt-4 text-sm text-muted-foreground">
             Already have an account?{" "}
             <Link href="/login" className="text-primary hover:text-primary/80">

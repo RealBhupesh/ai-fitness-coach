@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { isDemoModeEnabled } from "@/lib/env";
 
 const protectedPrefixes = [
   "/dashboard",
@@ -13,12 +14,14 @@ const protectedPrefixes = [
   "/onboarding",
 ];
 
-const SESSION_COOKIE_NAMES = ["better-auth.session_token", "__Secure-better-auth.session_token", "fitcoach_demo"];
+const SESSION_COOKIE_NAMES = ["better-auth.session_token", "__Secure-better-auth.session_token"];
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  const hasSession = SESSION_COOKIE_NAMES.some((name) => Boolean(request.cookies.get(name)?.value));
+  const hasRealSession = SESSION_COOKIE_NAMES.some((name) => Boolean(request.cookies.get(name)?.value));
+  const hasDemoSession = isDemoModeEnabled() && Boolean(request.cookies.get("fitcoach_demo")?.value);
+  const hasSession = hasRealSession || hasDemoSession;
   const isProtected = protectedPrefixes.some((prefix) => pathname.startsWith(prefix));
   const isAuthPage = pathname === "/login" || pathname === "/signup";
 

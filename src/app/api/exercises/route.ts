@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { exercises, danceStyles } from "@/db/schema";
-import { eq, and, like } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 // GET exercises
 export async function GET(request: NextRequest) {
@@ -19,26 +19,21 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ danceStyles: styles });
     }
 
-    // Get exercises
-    let query = db.select().from(exercises).where(eq(exercises.isActive, true));
-
-    // Apply filters (simplified - in production use Drizzle query builder properly)
-    const allExercises = await db.query.exercises.findMany({
-      where: eq(exercises.isActive, true),
-    });
-
-    let filtered = allExercises;
-
+    const filters = [eq(exercises.isActive, true)];
     if (category) {
-      filtered = filtered.filter((ex) => ex.category === category);
+      filters.push(eq(exercises.category, category));
     }
 
     if (difficulty) {
-      filtered = filtered.filter((ex) => ex.difficulty === difficulty);
+      filters.push(eq(exercises.difficulty, difficulty));
     }
 
-    return NextResponse.json({ exercises: filtered });
-  } catch (error: any) {
+    const rows = await db.query.exercises.findMany({
+      where: and(...filters),
+    });
+
+    return NextResponse.json({ exercises: rows });
+  } catch (error) {
     console.error("Exercises API Error:", error);
     return NextResponse.json(
       { error: "Failed to fetch exercises" },

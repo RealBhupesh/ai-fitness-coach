@@ -1,4 +1,5 @@
 import type { AppUserProfile } from "@/lib/app-types";
+import { isDemoModeEnabled } from "@/lib/env";
 
 const DEMO_COOKIE = "fitcoach_demo";
 const DEMO_STORAGE_KEY = "fitcoach_demo_v1";
@@ -128,6 +129,9 @@ export function isDemoUser(userId: string) {
 }
 
 export function createDemoSession() {
+  if (!isDemoModeEnabled()) {
+    return null;
+  }
   if (typeof document !== "undefined") {
     document.cookie = `${DEMO_COOKIE}=1; path=/; max-age=2592000; samesite=lax`;
   }
@@ -238,6 +242,7 @@ export function clearDemoNutritionPlan() {
 }
 
 export function getDemoSession(): typeof DEMO_USER | null {
+  if (!isDemoModeEnabled()) return null;
   if (typeof localStorage === "undefined") return null;
   try {
     const raw = localStorage.getItem(DEMO_STORAGE_KEY);
@@ -260,7 +265,7 @@ export function clearDemoSession() {
 }
 
 export function hasDemoCookie(cookieHeader: string) {
-  return cookieHeader.includes(`${DEMO_COOKIE}=1`);
+  return isDemoModeEnabled() && cookieHeader.includes(`${DEMO_COOKIE}=1`);
 }
 
 export function buildDemoServerSession() {

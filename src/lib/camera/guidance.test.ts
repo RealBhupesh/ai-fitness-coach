@@ -4,7 +4,7 @@ import { buildUnreliableCameraGuidance } from "@/lib/camera/guidance";
 describe("camera guidance", () => {
   it("suppresses movement advice when camera tracking is unreliable", () => {
     const guidance = buildUnreliableCameraGuidance({
-      frameQuality: "too_dark",
+      frameQuality: "low_light",
       message: "Lighting is too low.",
       brightness: 18,
       centered: true,

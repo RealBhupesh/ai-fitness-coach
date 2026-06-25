@@ -2,12 +2,12 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
-import { getAppBaseUrl, getTrustedOrigins, validateServerEnv } from "@/lib/env";
+import { describeServerEnvState, getAppBaseUrl, getTrustedOrigins, validateServerEnv } from "@/lib/env";
 
 const envState = validateServerEnv();
 
 if (!envState.ok) {
-  throw new Error(`Missing required server environment variables: ${envState.missing.join(", ")}`);
+  throw new Error(`Server environment is not production-ready (${describeServerEnvState(envState)})`);
 }
 
 export const auth = betterAuth({

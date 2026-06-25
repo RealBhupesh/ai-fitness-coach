@@ -100,6 +100,16 @@ export async function POST(request: Request) {
 export async function DELETE(request: Request) {
   try {
     const session = await requireServerSession(request);
+    const guard = guardMutationRequest(request, {
+      bucket: "profile-delete",
+      key: `${session.user.id}:${getRequestIp(request)}`,
+      limit: 6,
+      windowMs: 5 * 60_000,
+    });
+    if (guard) {
+      return guard;
+    }
+
     if (isDemoUser(session.user.id)) {
       clearDemoProfile();
       const response = NextResponse.json({ message: "Profile reset", profile: buildDemoProfile() });

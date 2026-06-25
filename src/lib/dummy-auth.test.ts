@@ -1,5 +1,20 @@
-import { describe, expect, it } from "vitest";
-import { buildDemoProfile, getDemoProfileFromCookie } from "@/lib/dummy-auth";
+import { afterEach, describe, expect, it } from "vitest";
+import { buildDemoProfile, getDemoProfileFromCookie, hasDemoCookie } from "@/lib/dummy-auth";
+
+const ORIGINAL_ENV = { ...process.env };
+
+afterEach(() => {
+  process.env = { ...ORIGINAL_ENV };
+});
+
+function setNodeEnv(value: NodeJS.ProcessEnv["NODE_ENV"]) {
+  Object.defineProperty(process.env, "NODE_ENV", {
+    value,
+    configurable: true,
+    enumerable: true,
+    writable: true,
+  });
+}
 
 describe("dummy auth demo profile persistence", () => {
   it("preserves submitted demo profile fields when stored in a cookie", () => {
@@ -30,5 +45,16 @@ describe("dummy auth demo profile persistence", () => {
     expect(restored.dietaryPrefs).toEqual([]);
     expect(restored.injuries).toEqual([]);
     expect(restored.onboardingCompleted).toBe(false);
+  });
+
+  it("ignores demo cookies in production unless demo mode is explicitly enabled", () => {
+    setNodeEnv("production");
+    delete process.env.ENABLE_DEMO_MODE;
+    delete process.env.NEXT_PUBLIC_ENABLE_DEMO_MODE;
+
+    expect(hasDemoCookie("fitcoach_demo=1")).toBe(false);
+
+    process.env.ENABLE_DEMO_MODE = "true";
+    expect(hasDemoCookie("fitcoach_demo=1")).toBe(true);
   });
 });

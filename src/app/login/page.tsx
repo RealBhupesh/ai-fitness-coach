@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signIn, useSession } from "@/lib/auth/client";
 import { createDemoSession, getDemoSession } from "@/lib/dummy-auth";
+import { isDemoModeEnabled } from "@/lib/env";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -19,16 +20,17 @@ function LoginPageInner() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const demoModeEnabled = isDemoModeEnabled();
 
   useEffect(() => {
     if (!isPending && sessionData?.user?.id) {
       router.replace(searchParams.get("next") || "/dashboard");
       return;
     }
-    if (!isPending && !sessionData?.user?.id && getDemoSession()) {
+    if (!isPending && !sessionData?.user?.id && demoModeEnabled && getDemoSession()) {
       router.replace(searchParams.get("next") || "/dashboard");
     }
-  }, [isPending, router, searchParams, sessionData?.user?.id]);
+  }, [demoModeEnabled, isPending, router, searchParams, sessionData?.user?.id]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -90,7 +92,7 @@ function LoginPageInner() {
           </div>
           <div className="text-center">
             <CardTitle className="text-2xl font-black uppercase">Sign in to FitCoach AI</CardTitle>
-            <CardDescription>Use your account or jump into demo mode to test the dashboard and live coach.</CardDescription>
+            <CardDescription>{demoModeEnabled ? "Use your account or jump into demo mode to test the dashboard and live coach." : "Use your account to access the dashboard and live coach."}</CardDescription>
           </div>
         </CardHeader>
         <CardContent>
@@ -108,21 +110,25 @@ function LoginPageInner() {
               {submitting ? "Signing in..." : "Sign in"}
             </Button>
           </form>
-          <div className="relative my-4">
-            <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
-            <div className="relative flex justify-center text-xs uppercase"><span className="bg-card px-2 text-muted-foreground">or</span></div>
-          </div>
-          <Button
-            variant="outline"
-            className="w-full"
-            onClick={() => {
-              createDemoSession();
-              router.push(searchParams.get("next") || "/dashboard");
-              router.refresh();
-            }}
-          >
-            Continue as Demo User
-          </Button>
+          {demoModeEnabled ? (
+            <>
+              <div className="relative my-4">
+                <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
+                <div className="relative flex justify-center text-xs uppercase"><span className="bg-card px-2 text-muted-foreground">or</span></div>
+              </div>
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => {
+                  createDemoSession();
+                  router.push(searchParams.get("next") || "/dashboard");
+                  router.refresh();
+                }}
+              >
+                Continue as Demo User
+              </Button>
+            </>
+          ) : null}
           <p className="mt-4 text-sm text-muted-foreground">
             Don&apos;t have an account?{" "}
             <Link href="/signup" className="text-primary hover:text-primary/80">

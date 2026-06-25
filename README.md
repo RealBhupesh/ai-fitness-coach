@@ -9,7 +9,7 @@ Production-oriented Next.js application for:
 
 ## Stack
 
-- Next.js 15 + React 19 + TypeScript 5
+- Next.js 16 + React 19 + TypeScript 5
 - Drizzle ORM + PostgreSQL
 - better-auth
 - MediaPipe Pose Landmarker Web Tasks
@@ -20,7 +20,7 @@ Production-oriented Next.js application for:
 
 - Public routes: `/`, `/login`, `/signup`
 - Authenticated routes: `/dashboard`, `/coach/*`, `/workouts`, `/workout-plans`, `/nutrition`, `/progress`, `/achievements`, `/settings`, `/onboarding`
-- Middleware only redirects based on session-cookie presence
+- Proxy only redirects based on session-cookie presence
 - Route handlers are the real auth boundary through `requireServerSession()`
 - Live coach runtime is centered in [src/components/PoseAnalyzer.tsx](/g:/@final%20year%20project/ai-fitness-dance-diet-coach-main/src/components/PoseAnalyzer.tsx)
 - The live runtime is split across:
@@ -29,7 +29,7 @@ Production-oriented Next.js application for:
   - `src/lib/pose/quality.ts`
   - `src/lib/pose/session-buffer.ts`
   - `src/lib/pose/replay.ts`
-- A demo auth path is intentionally supported for testing via the login and signup screens
+- Demo auth is available only when `ENABLE_DEMO_MODE` or `NEXT_PUBLIC_ENABLE_DEMO_MODE` is explicitly enabled
 
 ## Environment
 
@@ -48,10 +48,14 @@ Optional but strongly recommended:
 TRUSTED_ORIGINS=http://localhost:3000
 GROQ_API_KEY=your-groq-api-key
 OPENAI_API_KEY=your-openai-api-key
+ENABLE_DEMO_MODE=false
+NEXT_PUBLIC_ENABLE_DEMO_MODE=false
 ```
 
 Notes:
 - `DATABASE_URL` must point to PostgreSQL now. SQLite/libSQL is no longer the active baseline.
+- Production rejects missing env and placeholder/short `BETTER_AUTH_SECRET` values.
+- Demo mode defaults to off in production. Enable it only for controlled demos.
 - If `GROQ_API_KEY` is set, Groq is used first.
 - If Groq is unavailable and `OPENAI_API_KEY` exists, OpenAI is used as fallback.
 
@@ -62,31 +66,63 @@ Notes:
 npm install
 ```
 
-2. Push the schema to your Postgres database:
+2. Start local PostgreSQL, or use Docker Compose:
 ```bash
-npm run db:push
+docker compose up -d db
 ```
 
-3. Seed baseline content:
+3. Apply migrations:
+```bash
+npm run db:migrate
+```
+
+4. Seed baseline content:
 ```bash
 npm run db:seed
 ```
 
-4. Start the app:
+5. Start the app:
 ```bash
 npm run dev
 ```
 
-5. Optional health check:
+6. Optional health check:
 ```bash
 curl http://localhost:3000/api/health
 ```
 
+`npm run db:push` is still available for local schema iteration. Use committed migrations through `npm run db:migrate` for production-like environments.
+
+## Production Build
+
+```bash
+npm run db:check
+npm run test
+npm run typecheck
+npm run lint
+npm run build
+npm audit --audit-level=moderate
+```
+
+The build script uses `next build --webpack` because Next 16 Turbopack currently panics on this repository path/layout. Keep Webpack for release builds until that upstream issue is fixed and verified.
+
+To run the built app locally:
+```bash
+npm start
+```
+
+To run the containerized stack:
+```bash
+docker compose up --build
+docker compose exec app npm run db:migrate
+docker compose exec app npm run db:seed
+```
+
 ## Demo Mode
 
-- `/login` and `/signup` both include a `Continue as Demo User` action.
+- `/login` and `/signup` include a `Continue as Demo User` action only when demo mode is enabled.
 - Demo mode sets a local cookie and localStorage marker instead of creating a real Better Auth session.
-- Protected pages still open normally because middleware and `getServerSession()` recognize the demo session.
+- Protected pages open normally because proxy and `getServerSession()` recognize the demo session when demo mode is enabled.
 - Some write-heavy APIs return safe stubbed success responses in demo mode so you can test the UI flow without mutating the real database.
 
 ## Available Scripts
@@ -94,9 +130,13 @@ curl http://localhost:3000/api/health
 ```bash
 npm run dev
 npm run build
+npm run typecheck
 npm run test
 npm run test:e2e
+npm run test:e2e:prod
 npm run db:generate
+npm run db:check
+npm run db:migrate
 npm run db:push
 npm run db:seed
 npm run db:studio
@@ -121,9 +161,11 @@ Current automated coverage includes:
 - Vitest unit tests for the dance comparator
 - Vitest unit tests for request-guard behavior
 - Playwright smoke coverage for login and signup rendering
+- Playwright production smoke mode through `npm run test:e2e:prod`
 
-Playwright note:
-- the smoke suite now starts Next.js on an isolated default port (`3100`) so it does not hang when `3000` is already occupied locally
+Playwright notes:
+- the smoke suite starts Next.js on an isolated default port (`3100`) so it does not hang when `3000` is already occupied locally
+- production smoke mode builds first, starts `next start`, and disables demo mode by default
 
 Real-device camera QA is still required before calling the live coach fully release-ready.
 
@@ -131,6 +173,8 @@ Replay and benchmark scaffolding now lives in:
 - `src/lib/pose/replay.ts`
 - `fixtures/live-stack/README.md`
 - `docs/live-stack-validation.md`
+- `docs/fitness-module-readiness.md`
+- `docs/hip-hop-training-engine.md`
 
 ## Important Files
 
@@ -147,7 +191,8 @@ Read these first if you are taking over:
 
 ## Current Status
 
-- `npm run build` passes
+- `npm run build` passes on Next 16 through Webpack
+- `npm audit --audit-level=moderate` reports 0 vulnerabilities
 - protected POST APIs now require authenticated sessions
 - request origin checks and in-memory rate limiting are enabled on mutating APIs
 - chat session summary/context are now used in the AI prompt path

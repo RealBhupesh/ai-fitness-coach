@@ -13,8 +13,9 @@ export async function GET() {
     return NextResponse.json({
       ok: envState.ok,
       database: "connected",
-      env: envState.ok ? "configured" : "missing",
+      env: envState.ok ? "configured" : envState.invalid.length > 0 ? "invalid" : "missing",
       missing: envState.missing,
+      invalid: envState.invalid,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
@@ -22,8 +23,9 @@ export async function GET() {
       {
         ok: false,
         database: "disconnected",
-        env: envState.ok ? "configured" : "missing",
+        env: envState.ok ? "configured" : envState.invalid.length > 0 ? "invalid" : "missing",
         missing: envState.missing,
+        invalid: envState.invalid,
         error: error instanceof Error ? error.message : "Database connectivity check failed",
         timestamp: new Date().toISOString(),
       },
