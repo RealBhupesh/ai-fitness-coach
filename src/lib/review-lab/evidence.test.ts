@@ -177,3 +177,13 @@ describe("review lab evidence builder", () => {
     expect(report.cameraQuality).toBe("unreliable");
   });
 });
+
+describe("review lab demo fixtures", () => {
+  it("provides one squat, one curl, and one dance report", async () => {
+    const { getDemoReviewLabReports } = await import("@/lib/review-lab/demo-fixtures");
+    const reports = getDemoReviewLabReports();
+
+    expect(reports.map((report) => report.module)).toEqual(["squat", "bicep_curl", "dance"]);
+    expect(reports.every((report) => report.limitations.some((limitation) => limitation.code === "not_medical_device"))).toBe(true);
+  });
+});
