@@ -22,7 +22,7 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   webServer: {
-    command: useProductionBuild ? `npm run build && npx next start --port ${port}` : `npx next dev --port ${port}`,
+    command: useProductionBuild ? `npm run build && npx next start --port ${port}` : `npx next dev --webpack --port ${port}`,
     url: baseURL,
     env: webServerEnv,
     reuseExistingServer: !process.env.CI,

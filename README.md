@@ -151,6 +151,17 @@ The primary routine pack lives in:
 
 The server route `GET /api/dance/routine` prefers the packaged routine asset and falls back to the DB-seeded routine only if the asset pack is unavailable.
 
+## Movement Intelligence Review Lab
+
+The Review Lab is a professor-facing evidence layer for squat, bicep curl, and dance sessions.
+
+Routes:
+- `/review-lab`
+- `/review-lab/[sessionId]`
+- `/review-lab/methodology`
+
+It shows structured evidence, camera confidence, AI cue grounding, limitations, and exportable report payloads. It does not store raw video and does not make medical-grade or diagnostic claims.
+
 ## Tests
 
 Current automated coverage includes:

@@ -24,7 +24,8 @@ export function proxy(request: NextRequest) {
   const hasRealSession = SESSION_COOKIE_NAMES.some((name) => Boolean(request.cookies.get(name)?.value));
   const hasDemoSession = isDemoModeEnabled() && Boolean(request.cookies.get("fitcoach_demo")?.value);
   const hasSession = hasRealSession || hasDemoSession;
-  const isProtected = protectedPrefixes.some((prefix) => pathname.startsWith(prefix));
+  const isPublicReviewMethodology = pathname === "/review-lab/methodology";
+  const isProtected = !isPublicReviewMethodology && protectedPrefixes.some((prefix) => pathname.startsWith(prefix));
   const isAuthPage = pathname === "/login" || pathname === "/signup" || pathname.startsWith("/sign-in") || pathname.startsWith("/sign-up");
 
   if (isProtected && !hasSession) {

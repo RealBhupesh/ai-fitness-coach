@@ -215,13 +215,13 @@ function titleFor(module: ReviewLabModule) {
 }
 
 export function buildReviewLabReport({ session, reps, feedbackEvents }: BuildReviewLabReportInput): ReviewLabReport {
-  const module = moduleFromSession(session);
+  const sessionModule = moduleFromSession(session);
   const frameStats = parseObject<Record<string, unknown>>(session.frameQualityStats, {});
   const quality = cameraQuality(frameStats);
   const evidence =
-    module === "dance"
+    sessionModule === "dance"
       ? buildPhraseEvidence(session)
-      : reps.map((rep) => buildRepEvidence(module, rep)).filter((item): item is ReviewLabRepEvidence => Boolean(item));
+      : reps.map((rep) => buildRepEvidence(sessionModule, rep)).filter((item): item is ReviewLabRepEvidence => Boolean(item));
   const evidenceLabels = evidence.flatMap((item) => item.metrics.map((metric) => metric.label));
   const mistakeProbabilities = evidence.flatMap((item) => item.mistakes);
   const limitations = limitationsFor(session, quality, evidence.length);
@@ -231,8 +231,8 @@ export function buildReviewLabReport({ session, reps, feedbackEvents }: BuildRev
   return {
     id: session.id,
     userId: session.userId,
-    module,
-    title: titleFor(module),
+    module: sessionModule,
+    title: titleFor(sessionModule),
     date: session.date.toISOString(),
     durationMinutes: Number(session.duration ?? 0),
     overallScore: score,
@@ -241,7 +241,7 @@ export function buildReviewLabReport({ session, reps, feedbackEvents }: BuildRev
     topMistake,
     evidenceCount: evidence.length,
     limitationCount: limitations.length,
-    summary: session.summary ?? `${titleFor(module)} generated from structured session evidence.`,
+    summary: session.summary ?? `${titleFor(sessionModule)} generated from structured session evidence.`,
     methodologyVersion: REVIEW_LAB_METHODOLOGY.version,
     claimBoundary: REVIEW_LAB_METHODOLOGY.claimBoundary,
     metricTimeline: evidence.flatMap((item, index) =>
