@@ -80,17 +80,17 @@ export function getDemoReviewLabReports() {
     buildReviewLabReport({
       session: session("squat"),
       reps: [squatRep],
-      feedbackEvents: [{ timestamp: 1200, type: "cue", message: "Track knees over toes on the ascent.", severity: "warning", source: "llm_coach" }],
+      feedbackEvents: [{ timestamp: 1200, message: "Track knees over toes on the ascent.", severity: "warning", source: "llm_coach" }],
     }),
     buildReviewLabReport({
       session: session("bicep_curl"),
       reps: [curlRep],
-      feedbackEvents: [{ timestamp: 900, type: "cue", message: "Good wrist stack; keep elbow pinned.", severity: "info", source: "llm_coach" }],
+      feedbackEvents: [{ timestamp: 900, message: "Good wrist stack; keep elbow pinned.", severity: "info", source: "llm_coach" }],
     }),
     buildReviewLabReport({
       session: session("dance"),
       reps: [],
-      feedbackEvents: [{ timestamp: 600, type: "cue", message: "Hit the wrist shape earlier on count 2.", severity: "warning", source: "llm_coach" }],
+      feedbackEvents: [{ timestamp: 600, message: "Hit the wrist shape earlier on count 2.", severity: "warning", source: "llm_coach" }],
     }),
   ];
 }

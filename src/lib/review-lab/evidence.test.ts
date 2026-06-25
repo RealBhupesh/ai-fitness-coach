@@ -86,6 +86,7 @@ describe("review lab evidence builder", () => {
 
     expect(report.module).toBe("squat");
     expect(report.evidence[0].kind).toBe("rep");
+    if (report.evidence[0].kind !== "rep") throw new Error("Expected rep evidence");
     expect(report.evidence[0].failedMetrics).toContain("Knee tracking");
     expect(report.mistakeProbabilities[0].label).toBe("Knee tracking");
     expect(report.aiCueHistory[0].claimBoundary).toBe("AI coach guidance, not medical diagnosis");
@@ -160,6 +161,7 @@ describe("review lab evidence builder", () => {
 
     expect(report.module).toBe("dance");
     expect(report.evidence[0].kind).toBe("phrase");
+    if (report.evidence[0].kind !== "phrase") throw new Error("Expected phrase evidence");
     expect(report.evidence[0].phraseLabel).toBe("Bounce and hit");
   });
 

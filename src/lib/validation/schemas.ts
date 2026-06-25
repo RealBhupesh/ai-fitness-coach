@@ -365,3 +365,7 @@ export const workoutSessionInputSchema = z.object({
     )
     .default([]),
 });
+
+export const reviewLabExportSchema = z.object({
+  sessionId: z.string().min(1).max(160),
+});
