@@ -1,10 +1,29 @@
 import { NextResponse } from "next/server";
 import { requireServerSession } from "@/lib/auth/session";
+import { isDemoUser } from "@/lib/dummy-auth";
+import { DEMO_ACHIEVEMENTS, DEMO_ACHIEVEMENT_STATS } from "@/lib/demo-performance";
 import { buildAchievementProgress, ensureAchievements } from "@/lib/server/app-data";
 
 export async function GET(request: Request) {
   try {
     const session = await requireServerSession(request);
+    if (isDemoUser(session.user.id)) {
+      const closestAchievement = DEMO_ACHIEVEMENTS
+        .filter((achievement) => !achievement.unlocked)
+        .map((achievement) => ({
+          ...achievement,
+          remaining: Math.max(0, achievement.threshold - achievement.progress),
+          percent: Math.min(100, Math.round((achievement.progress / Math.max(achievement.threshold, 1)) * 100)),
+        }))
+        .sort((a, b) => a.remaining - b.remaining)[0] ?? null;
+
+      return NextResponse.json({
+        stats: DEMO_ACHIEVEMENT_STATS,
+        achievements: DEMO_ACHIEVEMENTS,
+        closestAchievement,
+      });
+    }
+
     const { allAchievements, awards, stats } = await ensureAchievements(session.user.id);
     const awardsMap = new Map(awards.map((award) => [award.achievementId, award]));
     const progressByName = buildAchievementProgress(stats);

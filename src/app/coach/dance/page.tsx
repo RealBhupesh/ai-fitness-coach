@@ -3,8 +3,7 @@
 import { Suspense } from "react";
 import dynamic from "next/dynamic";
 
-// Dynamic import to avoid SSR issues with MediaPipe
-const PoseAnalyzer = dynamic(() => import("@/components/PoseAnalyzer"), {
+const DanceStudio = dynamic(() => import("@/components/dance/DanceStudio"), {
   ssr: false,
   loading: () => (
     <div className="min-h-screen bg-gradient-to-br from-zinc-950 via-zinc-900 to-zinc-950 flex items-center justify-center">
@@ -28,7 +27,7 @@ export default function DanceCoachPage() {
         </div>
       }
     >
-      <PoseAnalyzer mode="dance" />
+      <DanceStudio />
     </Suspense>
   );
 }

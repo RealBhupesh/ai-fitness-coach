@@ -96,4 +96,29 @@ export interface DashboardSummary {
     carbsGrams: number;
     fatGrams: number;
   } | null;
+  communityLeaderboard?: Array<{
+    id: string;
+    name: string;
+    role: string;
+    level: string;
+    avatar: string;
+    score: number;
+    streak: number;
+    sessions: number;
+    danceScore: number;
+    topMove: string;
+    trend: "up" | "steady";
+  }>;
+  featuredAchievements?: Array<{
+    id: string;
+    name: string;
+    description: string;
+    category: string;
+    icon: string;
+    points: number;
+    threshold: number;
+    progress: number;
+    unlocked: boolean;
+    unlockedDate: string | null;
+  }>;
 }

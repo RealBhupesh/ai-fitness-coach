@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { Activity, AlertCircle, BatteryCharging, Bell, Bot, Calendar, CheckCircle2, Clock, Dumbbell, Flame, HeartPulse, LineChart, MessageSquare, Music2, Play, Sparkles, Target, TrendingUp } from "lucide-react";
+import { Activity, AlertCircle, Award, BatteryCharging, Bell, Bot, Calendar, CheckCircle2, Clock, Dumbbell, Flame, HeartPulse, LineChart, MessageSquare, Music2, Play, Sparkles, Target, TrendingUp, Trophy, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -175,6 +175,8 @@ export default function DashboardPage() {
 
   const name = profile?.name?.split(" ")[0] || "Athlete";
   const firstTime = !loading && summary.totalWorkouts === 0;
+  const communityLeaderboard = summary.communityLeaderboard ?? [];
+  const featuredAchievements = summary.featuredAchievements ?? [];
   const bodyBatteryAverage = agent?.bodyBattery?.length
     ? Math.round(agent.bodyBattery.reduce((sum, item) => sum + item.energy, 0) / agent.bodyBattery.length)
     : 0;
@@ -467,6 +469,95 @@ export default function DashboardPage() {
           );
         })}
       </div>
+
+      {(communityLeaderboard.length || featuredAchievements.length) ? (
+        <div className="grid gap-4 lg:grid-cols-[0.95fr_1.05fr]">
+          {featuredAchievements.length ? (
+            <Card className="overflow-hidden border-primary/20 bg-card/95">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Trophy className="h-5 w-5 text-primary" />
+                  Achievement Runway
+                </CardTitle>
+                <CardDescription>New users can see what unlocks next before their first live session.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {featuredAchievements.slice(0, 4).map((achievement) => {
+                  const percent = Math.min(100, Math.round((achievement.progress / Math.max(achievement.threshold, 1)) * 100));
+                  return (
+                    <div key={achievement.id} className="rounded-lg border bg-background/45 p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-semibold">{achievement.name}</p>
+                            {achievement.unlocked ? <Badge>Unlocked</Badge> : <Badge variant="secondary">{percent}%</Badge>}
+                          </div>
+                          <p className="mt-1 text-xs text-muted-foreground">{achievement.description}</p>
+                        </div>
+                        <Award className="h-5 w-5 shrink-0 text-accent" />
+                      </div>
+                      <div className="mt-3 h-2 rounded-full bg-muted">
+                        <div className="h-full rounded-full bg-primary" style={{ width: `${percent}%` }} />
+                      </div>
+                      <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
+                        <span>{achievement.progress} / {achievement.threshold}</span>
+                        <span>{achievement.points} XP</span>
+                      </div>
+                    </div>
+                  );
+                })}
+                <Link href="/achievements">
+                  <Button variant="outline" className="w-full gap-2">
+                    <Trophy className="h-4 w-4" />
+                    Open achievements
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {communityLeaderboard.length ? (
+            <Card className="overflow-hidden border-accent/20 bg-card/95">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Users className="h-5 w-5 text-accent" />
+                  People Scoring
+                </CardTitle>
+                <CardDescription>Class leaderboard for demo comparisons, dance score, streak, and top move.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {communityLeaderboard.slice(0, 4).map((athlete, index) => (
+                  <div key={athlete.id} className="grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-lg border bg-background/45 p-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary/15 text-sm font-black text-primary">
+                      {index + 1}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-semibold">{athlete.name}</p>
+                        <Badge variant="secondary">{athlete.level}</Badge>
+                        <Badge variant="outline">{athlete.trend}</Badge>
+                      </div>
+                      <p className="mt-1 truncate text-xs text-muted-foreground">
+                        {athlete.role} • {athlete.sessions} sessions • top move: {athlete.topMove}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-2xl font-black leading-none">{athlete.score}</p>
+                      <p className="text-xs text-muted-foreground">dance {athlete.danceScore}</p>
+                    </div>
+                  </div>
+                ))}
+                <Link href="/coach/dance">
+                  <Button className="w-full gap-2">
+                    <Music2 className="h-4 w-4" />
+                    Practice dance score
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
+          ) : null}
+        </div>
+      ) : null}
 
       {agent ? (
         <Card className="border-accent/20 bg-accent/5">
