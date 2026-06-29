@@ -875,7 +875,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   const framesRef = useRef<FrameAnalysis[]>([]);
   const curveRef = useRef<number[]>([]);
   const sessionBufferRef = useRef<SessionAnalysisBuffer>(createSessionAnalysisBuffer());
-  const danceSegmentRef = useRef<Record<string, { label: string; scores: number[]; timing: number[]; transition: number[] }>>({});
+  const danceSegmentRef = useRef<Record<string, { label: string; scores: number[]; timing: number[]; transition: number[]; reliability: number[] }>>({});
   const lastCoachRef = useRef(0);
   const lastCoachSignatureRef = useRef<string | null>(null);
   const lastOverallRef = useRef(0);
@@ -1469,10 +1469,11 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
           tempoControl: comparison.metrics.timing.score,
           torsoStability: comparison.metrics.torsoControl.score,
         });
-        const bucket = danceSegmentRef.current[comparison.segment.id] ?? { label: comparison.segment.label, scores: [], timing: [], transition: [] };
+        const bucket = danceSegmentRef.current[comparison.segment.id] ?? { label: comparison.segment.label, scores: [], timing: [], transition: [], reliability: [] };
         bucket.scores.push(comparison.overall);
         bucket.timing.push(comparison.timingScore);
         bucket.transition.push(comparison.transitionQuality);
+        bucket.reliability.push(comparison.reliability);
         danceSegmentRef.current[comparison.segment.id] = bucket;
       }
     } else {
@@ -1634,6 +1635,16 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       const pick = (selector: (frame: FrameAnalysis) => number) => Math.round(average(framesRef.current.map(selector)));
       const scoring = { form: pick((frame) => frame.form), rom: pick((frame) => frame.rom), tempo: pick((frame) => frame.tempo), stability: pick((frame) => frame.stability), symmetry: pick((frame) => frame.symmetry), consistency: pick((frame) => frame.consistency), endurance: pick((frame) => frame.endurance), safety: pick((frame) => frame.safety) };
       const sessionAnalysis = finalizeSessionAnalysis(sessionBufferRef.current);
+      const danceSegments = mode === "dance"
+        ? Object.entries(danceSegmentRef.current).map(([id, value]) => ({
+            id,
+            label: value.label,
+            overall: Math.round(average(value.scores)),
+            timing: Math.round(average(value.timing)),
+            transition: Math.round(average(value.transition)),
+            reliability: Math.round(average(value.reliability)),
+          }))
+        : [];
       const response = await fetch("/api/workouts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1646,6 +1657,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
           compositeScore: analysisRef.current.overall,
           scoringBreakdown: scoring,
           fatigueCurve: curveRef.current,
+          danceSegments,
           summary: coachLineRef.current || feedbackRef.current,
           exercises: [{ exerciseId: exerciseIdRef.current, sets: exerciseRef.current.repBased ? 1 : 0, reps: repsRef.current, duration: secondsRef.current, formScore: scoring.form, romScore: scoring.rom, tempoScore: scoring.tempo, safetyScore: scoring.safety, corrections: Array.from(new Set(eventsRef.current.map((event) => event.message))).slice(0, 8) }],
           repData: repDataRef.current,

@@ -118,4 +118,24 @@ describe("live curl evidence schemas", () => {
 
     expect(parsed.success).toBe(true);
   });
+
+  it("accepts dance segment evidence in workout session payloads", () => {
+    const parsed = workoutSessionInputSchema.safeParse({
+      type: "dance",
+      exerciseType: "dance_basic",
+      compositeScore: 84,
+      danceSegments: [
+        {
+          id: "open-hit",
+          label: "Open Hit",
+          overall: 86,
+          timing: 82,
+          transition: 80,
+          reliability: 78,
+        },
+      ],
+    });
+
+    expect(parsed.success).toBe(true);
+  });
 });

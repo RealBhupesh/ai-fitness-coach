@@ -252,6 +252,38 @@ export const userAchievements = pgTable("user_achievements", {
   progress: integer("progress").default(0),
 });
 
+export const danceCourseProgress = pgTable("dance_course_progress", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  routineId: text("routine_id").notNull(),
+  segmentId: text("segment_id").notNull(),
+  status: text("status").notNull().default("not_started"),
+  bestScore: integer("best_score").default(0),
+  bestReliability: integer("best_reliability").default(0),
+  attempts: integer("attempts").default(0),
+  completedAt: timestamp("completed_at", { mode: "date" }),
+  lastAttemptAt: timestamp("last_attempt_at", { mode: "date" }),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+export const danceCourseAttempts = pgTable("dance_course_attempts", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  routineId: text("routine_id").notNull(),
+  segmentId: text("segment_id").notNull(),
+  mode: text("mode").notNull().default("full_routine"),
+  sourceSessionId: text("source_session_id").references(() => workoutSessions.id, { onDelete: "set null" }),
+  score: integer("score").notNull(),
+  reliability: integer("reliability").notNull(),
+  timingScore: integer("timing_score").default(0),
+  transitionScore: integer("transition_score").default(0),
+  durationSeconds: integer("duration_seconds").default(0),
+  completed: boolean("completed").default(false),
+  notes: text("notes"),
+  createdAt: createdAt(),
+});
+
 export const coachMemories = pgTable("coach_memories", {
   id: text("id").primaryKey(),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }).unique(),
@@ -362,6 +394,8 @@ export type SessionFeedbackEvent = typeof sessionFeedbackEvents.$inferSelect;
 export type ProgressTracking = typeof progressTracking.$inferSelect;
 export type NewProgressTracking = typeof progressTracking.$inferInsert;
 export type Achievement = typeof achievements.$inferSelect;
+export type DanceCourseProgress = typeof danceCourseProgress.$inferSelect;
+export type DanceCourseAttempt = typeof danceCourseAttempts.$inferSelect;
 export type NutritionPlan = typeof nutritionPlans.$inferSelect;
 export type FoodLog = typeof foodLog.$inferSelect;
 export type NewFoodLog = typeof foodLog.$inferInsert;

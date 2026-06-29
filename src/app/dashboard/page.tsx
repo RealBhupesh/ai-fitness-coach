@@ -130,10 +130,22 @@ type CoachAgentReport = {
   achievementRecommendation: string;
 };
 
+type DanceCourseCard = {
+  completionPercent: number;
+  completedLessons: number;
+  totalLessons: number;
+  nextLesson: {
+    title: string;
+    bestScore: number;
+    status: string;
+  } | null;
+};
+
 export default function DashboardPage() {
   const { profile } = useUserProfile();
   const [summary, setSummary] = useState<DashboardSummary>(emptySummary);
   const [agent, setAgent] = useState<CoachAgentReport | null>(null);
+  const [danceCourse, setDanceCourse] = useState<DanceCourseCard | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -160,6 +172,11 @@ export default function DashboardPage() {
         if (agentResponse.ok) {
           const agentData = await agentResponse.json();
           if (!cancelled) setAgent(agentData);
+        }
+        const danceResponse = await fetch("/api/dance/course", { credentials: "include" });
+        if (danceResponse.ok) {
+          const danceData = await danceResponse.json();
+          if (!cancelled) setDanceCourse(danceData.course ?? null);
         }
       } finally {
         if (!cancelled) {
@@ -393,6 +410,39 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
         </div>
+      ) : null}
+
+      {danceCourse ? (
+        <Card className="overflow-hidden border-primary/25 bg-[linear-gradient(135deg,color-mix(in_oklch,var(--primary)_12%,transparent),color-mix(in_oklch,var(--card)_94%,transparent)_48%,color-mix(in_oklch,var(--accent)_10%,transparent))]">
+          <CardContent className="grid gap-5 pt-6 lg:grid-cols-[1fr_auto] lg:items-center">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge className="gap-1">
+                  <Music2 className="h-3.5 w-3.5" />
+                  Continue Dance Course
+                </Badge>
+                <Badge variant="secondary">{danceCourse.completedLessons}/{danceCourse.totalLessons} lessons</Badge>
+              </div>
+              <h2 className="mt-3 text-3xl font-black uppercase leading-none md:text-4xl">
+                {danceCourse.nextLesson ? danceCourse.nextLesson.title : "Hip-Hop Starter Groove"}
+              </h2>
+              <p className="mt-2 text-sm text-muted-foreground">
+                {danceCourse.nextLesson
+                  ? `Next lesson status: ${danceCourse.nextLesson.status.replace(/_/g, " ")}. Best score ${danceCourse.nextLesson.bestScore}/100.`
+                  : "All lessons are complete. Repeat the full routine to improve your score."}
+              </p>
+              <div className="mt-4 h-2 max-w-xl rounded-full bg-muted">
+                <div className="h-full rounded-full bg-primary" style={{ width: `${danceCourse.completionPercent}%` }} />
+              </div>
+            </div>
+            <Link href="/coach/dance">
+              <Button className="w-full gap-2 lg:w-auto">
+                <Play className="h-4 w-4" />
+                Continue Dance
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
       ) : null}
 
       {agent ? (

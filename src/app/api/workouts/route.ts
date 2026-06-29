@@ -8,6 +8,8 @@ import { isDemoUser } from "@/lib/dummy-auth";
 import { guardMutationRequest, getRequestIp } from "@/lib/security/request-guard";
 import { updateCoachMemory } from "@/lib/server/coach-agent";
 import { ensureAchievements } from "@/lib/server/app-data";
+import { loadPrimaryDanceRoutinePack } from "@/lib/dance/routine-pack";
+import { recordDanceCourseAttempt } from "@/lib/server/dance-course";
 import { workoutSessionInputSchema } from "@/lib/validation/schemas";
 import { toJson } from "@/lib/utils/json";
 
@@ -135,6 +137,26 @@ export async function POST(request: Request) {
           source: event.source,
           createdAt: new Date(),
         })),
+      );
+    }
+
+    if (data.type === "dance" && data.danceSegments.length) {
+      const routine = await loadPrimaryDanceRoutinePack().catch(() => ({ id: "starter-groove-pack" }));
+      await Promise.all(
+        data.danceSegments.map((segment) =>
+          recordDanceCourseAttempt(session.user.id, {
+            routineId: routine.id,
+            segmentId: segment.id,
+            mode: "full_routine",
+            sourceSessionId: sessionId,
+            score: segment.overall,
+            reliability: segment.reliability,
+            timingScore: segment.timing,
+            transitionScore: segment.transition,
+            durationSeconds: data.duration * 60,
+            notes: segment.label,
+          }),
+        ),
       );
     }
 

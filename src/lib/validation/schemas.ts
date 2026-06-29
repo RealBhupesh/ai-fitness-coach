@@ -262,6 +262,19 @@ export const workoutSessionInputSchema = z.object({
       safety: 0,
     }),
   fatigueCurve: z.array(z.number().min(0).max(100)).default([]),
+  danceSegments: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(120),
+        label: z.string().min(1).max(160),
+        overall: z.number().min(0).max(100),
+        timing: z.number().min(0).max(100).default(0),
+        transition: z.number().min(0).max(100).default(0),
+        reliability: z.number().min(0).max(100).default(80),
+      }),
+    )
+    .max(24)
+    .default([]),
   summary: z.string().max(4000).optional(),
   exercises: z
     .array(
