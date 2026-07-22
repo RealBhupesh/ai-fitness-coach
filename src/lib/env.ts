@@ -45,7 +45,7 @@ export function isDemoModeEnabled() {
   const explicit = process.env.NEXT_PUBLIC_ENABLE_DEMO_MODE ?? process.env.ENABLE_DEMO_MODE;
   if (flagEnabled(explicit)) return true;
   if (flagDisabled(explicit)) return false;
-  return process.env.NODE_ENV !== "production";
+  return true;
 }
 
 export function isClerkAuthEnabled() {

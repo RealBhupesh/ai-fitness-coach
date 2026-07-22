@@ -154,6 +154,11 @@ export default function HomePage() {
                       <ArrowRight className="ml-2 h-5 w-5" />
                     </Button>
                   </Link>
+                  <Link href="/demo">
+                    <Button size="lg" variant="outline" className="h-12 px-8">
+                      Try Demo User
+                    </Button>
+                  </Link>
                   <Link href="/workouts">
                     <Button size="lg" variant="outline" className="h-12 px-8">
                       <Play className="mr-2 h-5 w-5" />

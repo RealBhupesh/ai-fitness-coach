@@ -17,14 +17,14 @@ function setNodeEnv(value: NodeJS.ProcessEnv["NODE_ENV"]) {
 }
 
 describe("environment production gates", () => {
-  it("enables demo mode by default outside production only", () => {
+  it("enables demo mode by default for showcase deployments", () => {
     setNodeEnv("development");
     delete process.env.NEXT_PUBLIC_ENABLE_DEMO_MODE;
     delete process.env.ENABLE_DEMO_MODE;
     expect(isDemoModeEnabled()).toBe(true);
 
     setNodeEnv("production");
-    expect(isDemoModeEnabled()).toBe(false);
+    expect(isDemoModeEnabled()).toBe(true);
   });
 
   it("allows explicit demo-mode override", () => {
@@ -35,6 +35,9 @@ describe("environment production gates", () => {
     process.env.ENABLE_DEMO_MODE = "false";
     process.env.NEXT_PUBLIC_ENABLE_DEMO_MODE = "1";
     expect(isDemoModeEnabled()).toBe(true);
+
+    process.env.NEXT_PUBLIC_ENABLE_DEMO_MODE = "false";
+    expect(isDemoModeEnabled()).toBe(false);
   });
 
   it("rejects placeholder production secrets", () => {
