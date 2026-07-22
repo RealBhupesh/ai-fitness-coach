@@ -53,18 +53,22 @@ export function isClerkAuthEnabled() {
 }
 
 export function validateServerEnv() {
-  const missing = ["BETTER_AUTH_SECRET"].filter((key) => !process.env[key]);
+  const missing: string[] = [];
   const invalid: string[] = [];
   const warnings: string[] = [];
 
   if (
     process.env.NODE_ENV === "production" &&
-    (!process.env.BETTER_AUTH_SECRET ||
-      process.env.BETTER_AUTH_SECRET === "your-secret-key-change-in-production" ||
+    process.env.BETTER_AUTH_SECRET &&
+    (process.env.BETTER_AUTH_SECRET === "your-secret-key-change-in-production" ||
       process.env.BETTER_AUTH_SECRET === "replace-with-a-long-random-secret" ||
       process.env.BETTER_AUTH_SECRET.length < 32)
   ) {
     invalid.push("BETTER_AUTH_SECRET");
+  }
+
+  if (!process.env.BETTER_AUTH_SECRET) {
+    warnings.push("Better Auth secret not set; demo fallback secret will be used");
   }
 
   if (process.env.GOOGLE_CLIENT_ID && !process.env.GOOGLE_CLIENT_SECRET) {

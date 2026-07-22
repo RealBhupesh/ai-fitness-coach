@@ -4,6 +4,7 @@ import { db, isDatabaseConfigured } from "@/db";
 import * as schema from "@/db/schema";
 import { describeServerEnvState, getAppBaseUrl, getTrustedOrigins, validateServerEnv } from "@/lib/env";
 
+const DEMO_AUTH_SECRET = "fitcoach-demo-only-fallback-secret-for-vercel-preview";
 const envState = validateServerEnv();
 
 if (!envState.ok) {
@@ -50,7 +51,7 @@ export const auth = betterAuth({
       },
     },
   },
-  secret: process.env.BETTER_AUTH_SECRET!,
+  secret: process.env.BETTER_AUTH_SECRET || DEMO_AUTH_SECRET,
   baseURL: getAppBaseUrl(),
   trustedOrigins: getTrustedOrigins(),
 });
