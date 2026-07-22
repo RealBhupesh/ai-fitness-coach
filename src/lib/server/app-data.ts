@@ -1,7 +1,8 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { AppUserProfile, DashboardSummary, Goal, ProfilePersona } from "@/lib/app-types";
-import { db } from "@/db";
+import { db, isDatabaseConfigured } from "@/db";
+import { DEMO_ACHIEVEMENT_STATS, DEMO_DASHBOARD_SUMMARY } from "@/lib/demo-performance";
 import { isDemoUser } from "@/lib/dummy-auth";
 import {
   achievements,
@@ -28,6 +29,10 @@ type AchievementDefinition = {
   threshold: number;
   points: number;
 };
+
+declare global {
+  var __fitcoachFallbackProfiles: Map<string, AppUserProfile> | undefined;
+}
 
 export type AchievementStats = {
   totalSessions: number;
@@ -98,7 +103,54 @@ export function mapProfileToApp(user: { id: string; email: string; name: string 
   };
 }
 
+function fallbackProfiles() {
+  if (!globalThis.__fitcoachFallbackProfiles) {
+    globalThis.__fitcoachFallbackProfiles = new Map();
+  }
+  return globalThis.__fitcoachFallbackProfiles;
+}
+
+function buildFallbackProfile(userId: string, profile: Partial<AppUserProfile> = {}): AppUserProfile {
+  return {
+    userId,
+    email: profile.email ?? "demo@fitcoach.local",
+    name: profile.name?.trim() || (isDemoUser(userId) ? "Demo User" : "FitCoach User"),
+    age: profile.age,
+    gender: profile.gender,
+    heightCm: profile.heightCm,
+    weightKg: profile.weightKg,
+    targetWeightKg: profile.targetWeightKg,
+    experience: profile.experience ?? "beginner",
+    goals: profile.goals?.length ? profile.goals : ["dance_skill", "general_fitness"],
+    profileType: profile.profileType ?? "dance_athlete",
+    primarySport: profile.primarySport ?? "Hip-hop dance",
+    trainingStyle: profile.trainingStyle ?? "Camera-guided demo coaching",
+    readinessAssumptions: profile.readinessAssumptions ?? ["Demo data is used because no database is configured"],
+    coachingConstraints: profile.coachingConstraints ?? ["Keep feedback practical, evidence-based, and non-medical"],
+    baselineMetrics: profile.baselineMetrics ?? { readinessScore: 72, mobilityScore: 76, danceTimingScore: 64, postureConfidence: 78 },
+    dietaryPrefs: profile.dietaryPrefs ?? [],
+    injuries: profile.injuries ?? [],
+    painPoints: profile.painPoints ?? [],
+    equipmentAccess: profile.equipmentAccess ?? ["Laptop webcam", "Open floor"],
+    allergies: profile.allergies,
+    workoutFrequency: profile.workoutFrequency ?? 4,
+    workoutDuration: profile.workoutDuration ?? 25,
+    cuisinePreference: profile.cuisinePreference,
+    budgetTier: profile.budgetTier,
+    coachingTone: profile.coachingTone ?? "motivational",
+    sleepHours: profile.sleepHours,
+    onboardingCompleted: profile.onboardingCompleted ?? true,
+    lastUpdated: profile.lastUpdated ?? new Date().toISOString(),
+  };
+}
+
 export async function getAppProfile(userId: string) {
+  if (!isDatabaseConfigured) {
+    const profile = fallbackProfiles().get(userId) ?? buildFallbackProfile(userId);
+    fallbackProfiles().set(userId, profile);
+    return profile;
+  }
+
   const [user, profile] = await Promise.all([
     db.query.users.findFirst({ where: eq(users.id, userId) }),
     db.query.userProfiles.findFirst({ where: eq(userProfiles.userId, userId) }),
@@ -135,6 +187,22 @@ export function toProfileDbInput(profile: Partial<AppUserProfile>) {
     sleepHours: profile.sleepHours,
     onboardingCompleted: profile.onboardingCompleted,
   };
+}
+
+export function saveFallbackAppProfile(userId: string, profile: Partial<AppUserProfile>) {
+  const current = fallbackProfiles().get(userId) ?? buildFallbackProfile(userId);
+  const next = buildFallbackProfile(userId, {
+    ...current,
+    ...profile,
+    lastUpdated: new Date().toISOString(),
+  });
+  fallbackProfiles().set(userId, next);
+  return next;
+}
+
+export function clearFallbackAppProfile(userId: string) {
+  fallbackProfiles().delete(userId);
+  return buildFallbackProfile(userId);
 }
 
 export const PROFILE_PERSONAS: ProfilePersona[] = [
@@ -246,6 +314,19 @@ export function getProfilePersonas(currentProfile: AppUserProfile | null) {
 }
 
 export async function ensureChatSession(userId: string) {
+  if (!isDatabaseConfigured) {
+    const now = new Date();
+    return {
+      id: `fallback-chat-${userId}`,
+      userId,
+      title: "FitCoach AI",
+      summary: null,
+      context: null,
+      createdAt: now,
+      lastMessageAt: now,
+    };
+  }
+
   const existing = await db.query.chatSessions.findFirst({
     where: eq(chatSessions.userId, userId),
     orderBy: [desc(chatSessions.lastMessageAt), desc(chatSessions.createdAt)],
@@ -343,6 +424,13 @@ export function buildAchievementProgress(stats: AchievementStats) {
 }
 
 async function ensureAchievementCatalog() {
+  if (!isDatabaseConfigured) {
+    return ACHIEVEMENT_DEFINITIONS.map((achievement) => ({
+      ...achievement,
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    }));
+  }
+
   const existing = await db.query.achievements.findMany();
   const existingNames = new Set(existing.map((achievement) => achievement.name));
   const missing = ACHIEVEMENT_DEFINITIONS.filter((achievement) => !existingNames.has(achievement.name));
@@ -375,6 +463,10 @@ async function ensureAchievementCatalog() {
 }
 
 export async function getDashboardSummary(userId: string): Promise<DashboardSummary> {
+  if (!isDatabaseConfigured) {
+    return DEMO_DASHBOARD_SUMMARY;
+  }
+
   const [sessions, progress, plans, plansHistory, nutrition] = await Promise.all([
     db.query.workoutSessions.findMany({
       where: eq(workoutSessions.userId, userId),
@@ -574,6 +666,14 @@ export function buildFallbackNutritionPlan(profile: AppUserProfile | null) {
 }
 
 export async function ensureAchievements(userId: string) {
+  if (!isDatabaseConfigured) {
+    return {
+      allAchievements: await ensureAchievementCatalog(),
+      awards: [],
+      stats: DEMO_ACHIEVEMENT_STATS,
+    };
+  }
+
   const [allAchievements, sessions, currentAwards] = await Promise.all([
     ensureAchievementCatalog(),
     db.query.workoutSessions.findMany({ where: eq(workoutSessions.userId, userId) }),
@@ -638,12 +738,33 @@ export async function ensureAchievements(userId: string) {
 }
 
 export async function getDanceRoutineDemo() {
+  if (!isDatabaseConfigured) {
+    return null;
+  }
+
   return db.query.danceRoutines.findFirst({
     orderBy: [desc(danceRoutines.createdAt)],
   });
 }
 
 export async function getNutritionOverview(userId: string) {
+  if (!isDatabaseConfigured) {
+    return {
+      plan: DEMO_DASHBOARD_SUMMARY.activeNutritionPlan
+        ? {
+            id: DEMO_DASHBOARD_SUMMARY.activeNutritionPlan.id,
+            userId,
+            name: DEMO_DASHBOARD_SUMMARY.activeNutritionPlan.name,
+            dailyCalories: DEMO_DASHBOARD_SUMMARY.activeNutritionPlan.dailyCalories,
+            proteinGrams: DEMO_DASHBOARD_SUMMARY.activeNutritionPlan.proteinGrams,
+            carbsGrams: DEMO_DASHBOARD_SUMMARY.activeNutritionPlan.carbsGrams,
+            fatGrams: DEMO_DASHBOARD_SUMMARY.activeNutritionPlan.fatGrams,
+          }
+        : null,
+      todaysFood: [],
+    };
+  }
+
   const [plan, todaysFood] = await Promise.all([
     db.query.nutritionPlans.findFirst({
       where: and(eq(nutritionPlans.userId, userId), eq(nutritionPlans.isActive, true)),

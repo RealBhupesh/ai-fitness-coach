@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import type { AppUserProfile } from "@/lib/app-types";
+import { getAiProviderStatus, resolveAiProviderConfig, sanitizeAiError } from "@/lib/ai/provider";
 import { buildFallbackNutritionPlan, buildFallbackWorkoutPlan } from "@/lib/server/app-data";
 
 type ChatRole = "system" | "user" | "assistant";
@@ -11,19 +12,22 @@ const openAiClient = process.env.OPENAI_API_KEY
 const groqClient = process.env.GROQ_API_KEY
   ? new OpenAI({
       apiKey: process.env.GROQ_API_KEY,
-      baseURL: "https://api.groq.com/openai/v1",
+      baseURL: resolveAiProviderConfig()?.baseURL,
     })
   : null;
 
 function getClient() {
-  if (groqClient) {
-    return { client: groqClient, model: "llama-3.3-70b-versatile", provider: "groq" as const };
+  const config = resolveAiProviderConfig();
+  if (config?.provider === "groq" && groqClient) {
+    return { client: groqClient, model: config.model, provider: "groq" as const };
   }
-  if (openAiClient) {
-    return { client: openAiClient, model: "gpt-4o-mini", provider: "openai" as const };
+  if (config?.provider === "openai" && openAiClient) {
+    return { client: openAiClient, model: config.model, provider: "openai" as const };
   }
   return null;
 }
+
+export { getAiProviderStatus };
 
 function profileContext(profile: AppUserProfile | null | undefined) {
   if (!profile) {
@@ -80,6 +84,12 @@ function jsonObject(content: string | null | undefined) {
   }
 }
 
+function fallbackCoachMessage(profile: AppUserProfile | null) {
+  return `Here is a profile-aware starting point: focus on ${profile?.goals[0] ?? "general fitness"}, keep sessions around ${
+    profile?.workoutDuration ?? 30
+  } minutes, and prioritize clean form over intensity. If you tell me today's workout, equipment, or pain points, I can make this more specific.`;
+}
+
 export async function generateCoachMessage({
   profile,
   recentMessages,
@@ -108,31 +118,41 @@ Saved coaching context
 ${sessionContext || "No saved coaching context yet."}`;
 
   if (clientInfo) {
-    const completion = await clientInfo.client.chat.completions.create({
-      model: clientInfo.model,
-      temperature: 0.6,
-      max_tokens: 900,
-      messages: [
-        { role: "system", content: system },
-        ...recentMessages,
-        { role: "user", content: userMessage },
-      ],
-    });
+    try {
+      const completion = await clientInfo.client.chat.completions.create({
+        model: clientInfo.model,
+        temperature: 0.6,
+        max_tokens: 900,
+        messages: [
+          { role: "system", content: system },
+          ...recentMessages,
+          { role: "user", content: userMessage },
+        ],
+      });
 
-    return {
-      message:
-        completion.choices[0]?.message?.content ??
-        "I could not generate a response right now. Please try again.",
-      model: completion.model,
-      tokens: completion.usage?.total_tokens ?? 0,
-      provider: clientInfo.provider,
-    };
+      return {
+        message:
+          completion.choices[0]?.message?.content ??
+          "I could not generate a response right now. Please try again.",
+        model: completion.model,
+        tokens: completion.usage?.total_tokens ?? 0,
+        provider: clientInfo.provider,
+      };
+    } catch (error) {
+      return {
+        message: `${fallbackCoachMessage(profile)}\n\nAI provider note: ${clientInfo.provider} did not respond, so I used the local fallback coach.`,
+        model: "fallback",
+        tokens: 0,
+        provider: "fallback" as const,
+        attemptedProvider: clientInfo.provider,
+        attemptedModel: clientInfo.model,
+        error: sanitizeAiError(error),
+      };
+    }
   }
 
   return {
-    message: `Here is a profile-aware starting point: focus on ${profile?.goals[0] ?? "general fitness"}, keep sessions around ${
-      profile?.workoutDuration ?? 30
-    } minutes, and prioritize clean form over intensity. If you tell me today's workout, equipment, or pain points, I can make this more specific.`,
+    message: fallbackCoachMessage(profile),
     model: "fallback",
     tokens: 0,
     provider: "fallback" as const,
@@ -836,28 +856,31 @@ export async function generateCoachFeedback(input: {
       ? "Use a calm, non-irritating tone. Mention only the most important correction and include one positive anchor."
       : input.coachingLevel === "hard"
         ? "Be strict and precise. Judge elbow path, shoulder position, torso swing, wrist stack, range, symmetry, and tempo from the provided metrics."
-        : "Use balanced coaching: specific, short, and practical without sounding repetitive.";
+      : "Use balanced coaching: specific, short, and practical without sounding repetitive.";
+
+  const fallback = {
+    feedback:
+      input.currentIssues[0] ??
+      `Keep your ${input.exerciseType} reps smooth and controlled. Quality first, speed second.`,
+    priority: input.currentIssues.some((issue) => /pain|collapse|unsafe|valgus/i.test(issue)) ? "safety" : "form",
+    provider: "fallback" as const,
+    model: "fallback",
+  };
 
   if (!clientInfo) {
-    return {
-      feedback:
-        input.currentIssues[0] ??
-        `Keep your ${input.exerciseType} reps smooth and controlled. Quality first, speed second.`,
-      priority: input.currentIssues.some((issue) => /pain|collapse|unsafe|valgus/i.test(issue)) ? "safety" : "form",
-      provider: "fallback",
-      model: "fallback",
-    };
+    return fallback;
   }
 
-  const completion = await clientInfo.client.chat.completions.create({
-    model: clientInfo.model,
-    temperature: 0.35,
-    max_tokens: 220,
-    messages: [
-      {
-        role: "system",
-        content: isBicepCurl
-          ? `You are an expert strength coach focused on highly accurate bicep curl feedback.
+  try {
+    const completion = await clientInfo.client.chat.completions.create({
+      model: clientInfo.model,
+      temperature: 0.35,
+      max_tokens: 220,
+      messages: [
+        {
+          role: "system",
+          content: isBicepCurl
+            ? `You are an expert strength coach focused on highly accurate bicep curl feedback.
 Return exactly one short coaching cue (max 22 words).
 Coach level: ${input.coachingLevel ?? "normal"}. ${levelInstruction}
 Prioritize in order: injury risk -> elbow path -> shoulder shrug -> torso swing -> wrist stack -> range of motion -> symmetry.
@@ -866,8 +889,8 @@ Prefer language like: "left elbow drifting", "both shoulders shrugging", "right 
 If the cue is good news, be specific about what is clean.
 Never be generic.
 If issueSignature indicates the same mechanic as before, keep the same mechanic focus instead of inventing a new cue.`
-          : isDance
-            ? `You are an expert dance coach focused on precise posture and timing feedback.
+            : isDance
+              ? `You are an expert dance coach focused on precise posture and timing feedback.
 Return exactly one short coaching cue (max 22 words).
 Prioritize in order: injury risk -> knees locking -> torso leaning -> shoulder or hip tilt -> frame width -> arm height mismatch -> beat timing.
 Name the exact body part and exact mechanic that is failing.
@@ -875,11 +898,11 @@ Prefer language like: "left wrist dropping", "hips tilting right", "knees lockin
 If the cue is good news, be specific about what is clean.
 Never be generic.
 If issueSignature indicates the same mechanic as before, keep the same mechanic focus instead of inventing a new cue.`
-            : "You are a real-time workout coach. Respond with one short coaching cue. If an issue is safety-related, lead with safety and keep it direct.",
-      },
-      {
-        role: "user",
-        content: `Exercise: ${input.exerciseType}
+              : "You are a real-time workout coach. Respond with one short coaching cue. If an issue is safety-related, lead with safety and keep it direct.",
+        },
+        {
+          role: "user",
+          content: `Exercise: ${input.exerciseType}
 Coach level: ${input.coachingLevel ?? "normal"}
 Reps so far: ${input.repsSoFar}
 Current phase: ${input.phase ?? "unknown"}
@@ -898,11 +921,19 @@ ${scoreSummary}
 
 Profile:
 ${profileContext(input.profile)}`,
-      },
-    ],
-  });
+        },
+      ],
+    });
 
-  const feedback = completion.choices[0]?.message?.content?.trim() || "Keep moving with control.";
-  const priority = /stop|unsafe|pain|knee|back|neck/i.test(feedback) ? "safety" : input.currentIssues.length ? "form" : "motivation";
-  return { feedback, priority, provider: clientInfo.provider, model: clientInfo.model };
+    const feedback = completion.choices[0]?.message?.content?.trim() || "Keep moving with control.";
+    const priority = /stop|unsafe|pain|knee|back|neck/i.test(feedback) ? "safety" : input.currentIssues.length ? "form" : "motivation";
+    return { feedback, priority, provider: clientInfo.provider, model: clientInfo.model };
+  } catch (error) {
+    return {
+      ...fallback,
+      attemptedProvider: clientInfo.provider,
+      attemptedModel: clientInfo.model,
+      error: sanitizeAiError(error),
+    };
+  }
 }

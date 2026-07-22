@@ -1,7 +1,7 @@
 import { desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { NextResponse } from "next/server";
-import { db } from "@/db";
+import { db, isDatabaseConfigured } from "@/db";
 import { exerciseReps, sessionFeedbackEvents, workoutExercises, workoutSessions } from "@/db/schema";
 import { requireServerSession } from "@/lib/auth/session";
 import { isDemoUser } from "@/lib/dummy-auth";
@@ -16,7 +16,7 @@ import { toJson } from "@/lib/utils/json";
 export async function GET(request: Request) {
   try {
     const session = await requireServerSession(request);
-    if (isDemoUser(session.user.id)) {
+    if (isDemoUser(session.user.id) || !isDatabaseConfigured) {
       return NextResponse.json({ workouts: [] });
     }
     const workouts = await db.query.workoutSessions.findMany({
@@ -52,7 +52,7 @@ export async function POST(request: Request) {
     const data = parsed.data;
     const sessionId = nanoid();
 
-    if (isDemoUser(session.user.id)) {
+    if (isDemoUser(session.user.id) || !isDatabaseConfigured) {
       return NextResponse.json({ message: "Workout recorded (demo mode)", sessionId });
     }
 

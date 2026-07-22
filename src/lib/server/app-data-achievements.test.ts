@@ -5,7 +5,7 @@ process.env.DATABASE_URL ??= "postgres://user:pass@localhost:5432/fitcoach_test"
 describe("achievement progress engine", () => {
   afterAll(async () => {
     const { dbPool } = await import("@/db");
-    await dbPool.end();
+    await dbPool?.end();
   });
 
   it("maps calories, reps, fitness evidence, dance evidence, and streaks into achievement progress", async () => {

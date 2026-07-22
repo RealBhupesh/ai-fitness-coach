@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { db } from "@/db";
+import { db, isDatabaseConfigured } from "@/db";
 import { workoutSessions } from "@/db/schema";
 import { requireServerSession } from "@/lib/auth/session";
 import { isDemoUser } from "@/lib/dummy-auth";
@@ -32,7 +32,7 @@ export async function POST(request: Request) {
     let workoutText = "";
     let workoutId: string | null = null;
 
-    if (parsed.data.sessionId && !isDemoUser(session.user.id)) {
+    if (parsed.data.sessionId && !isDemoUser(session.user.id) && isDatabaseConfigured) {
       const workout = await db.query.workoutSessions.findFirst({
         where: eq(workoutSessions.id, parsed.data.sessionId),
       });
@@ -73,7 +73,7 @@ Top strengths: ${(parsed.data.topStrengths ?? []).join("; ") || "none"}`;
       curlCoachMemory: parsed.data.curlCoachMemory,
     });
 
-    if (workoutId && !isDemoUser(session.user.id)) {
+    if (workoutId && !isDemoUser(session.user.id) && isDatabaseConfigured) {
       await db
         .update(workoutSessions)
         .set({

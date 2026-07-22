@@ -36,6 +36,8 @@ import {
 } from "@/lib/pose/curl-scorecard";
 import { advancePhaseTracker, analyzeExercise, createPhaseTrackerState, EXERCISE_CONTRACTS, POSE_CONNECTIONS, POSE_EXERCISES } from "@/lib/pose/exercises";
 import { average, angle, distance } from "@/lib/pose/math";
+import { evaluatePostureMl } from "@/lib/pose/ml/evaluator";
+import type { PostureMistakeClass, PostureMlPrediction } from "@/lib/pose/ml/types";
 import { evaluateSafety } from "@/lib/pose/safety";
 import { createSessionAnalysisBuffer, finalizeSessionAnalysis, recordCue, recordFrame, recordTelemetry } from "@/lib/pose/session-buffer";
 import {
@@ -57,6 +59,8 @@ type FeedbackEvent = {
   severity: "critical" | "warning" | "info";
   source: "rule_engine" | "llm_coach" | "system";
 };
+
+type CoachTriggerReason = "issue_changed" | "score_drop" | "phase_milestone" | "manual";
 
 type TechniqueScorecard = {
   elbowPath: number;
@@ -137,6 +141,33 @@ async function parseApiResponse(response: Response) {
 const IDS = {
   workout: ["squat", "pushup", "lunge", "bicep_curl", "jumping_jack", "plank", "warrior"] as ExerciseId[],
   dance: ["dance_basic", "jumping_jack"] as ExerciseId[],
+};
+
+const DEFAULT_CALIBRATION_FRAMES = 18;
+const CURL_FAST_CALIBRATION_FRAMES = 4;
+const DANCE_FAST_CALIBRATION_FRAMES = 4;
+
+function isFastStartExercise(exerciseId: ExerciseId) {
+  return exerciseId === "bicep_curl" || exerciseId === "dance_basic";
+}
+
+function calibrationFramesForExercise(exerciseId: ExerciseId) {
+  if (exerciseId === "bicep_curl") return CURL_FAST_CALIBRATION_FRAMES;
+  if (exerciseId === "dance_basic") return DANCE_FAST_CALIBRATION_FRAMES;
+  return DEFAULT_CALIBRATION_FRAMES;
+}
+
+const ML_MISTAKE_LABELS: Record<PostureMistakeClass, string> = {
+  clean: "Clean movement",
+  squat_depth: "Squat depth",
+  knee_collapse: "Knee collapse",
+  torso_fold: "Torso fold",
+  hip_shift: "Hip shift",
+  curl_elbow_drift: "Elbow drift",
+  curl_shoulder_hike: "Shoulder hike",
+  curl_wrist_fold: "Wrist fold",
+  curl_incomplete_rom: "Incomplete ROM",
+  unstable_camera: "Unstable camera",
 };
 
 const EMPTY_CONFIDENCE = (exerciseId: ExerciseId): ConfidenceStatus => ({
@@ -895,7 +926,8 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   const [feedback, setFeedback] = useState("Enable the camera to calibrate.");
   const [secondaryFeedback, setSecondaryFeedback] = useState("");
   const [coachLine, setCoachLine] = useState("");
-  const [coachSource, setCoachSource] = useState<"llm" | "fallback" | "">("");
+  const [coachSource, setCoachSource] = useState<"groq" | "openai" | "fallback" | "">("");
+  const [isCoachRequesting, setIsCoachRequesting] = useState(false);
   const [summary, setSummary] = useState("");
   const [summaryInsights, setSummaryInsights] = useState<string[]>([]);
   const [summaryPractice, setSummaryPractice] = useState<string[]>([]);
@@ -906,6 +938,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   const [danceComparison, setDanceComparison] = useState<DanceComparison | null>(null);
   const [danceTraining, setDanceTraining] = useState<DanceTrainingFrameResult | null>(null);
   const [danceSegmentBreakdown, setDanceSegmentBreakdown] = useState<Array<{ id: string; label: string; overall: number; timing: number; transition: number }>>([]);
+  const [mlPrediction, setMlPrediction] = useState<PostureMlPrediction | null>(null);
   const [topMistakes, setTopMistakes] = useState<TopMistake[]>([]);
   const [correctivePlan, setCorrectivePlan] = useState<CorrectiveBlock[]>([]);
   const [curlBaseline, setCurlBaseline] = useState<CurlBaseline | null>(null);
@@ -1103,6 +1136,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     setDanceComparison(null);
     setDanceTraining(null);
     setDanceSegmentBreakdown([]);
+    setMlPrediction(null);
     setTopMistakes([]);
     setCorrectivePlan([]);
     setCurlBaseline(null);
@@ -1279,15 +1313,16 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     });
   };
 
-  const maybeCoach = async (frame: FrameAnalysis, cue: FeedbackCue, triggerReason: "issue_changed" | "score_drop" | "phase_milestone" | null) => {
-    if (!runningRef.current || !triggerReason) return;
+  const maybeCoach = async (frame: FrameAnalysis, cue: FeedbackCue, triggerReason: CoachTriggerReason | null) => {
+    if ((!runningRef.current && triggerReason !== "manual") || !triggerReason) return;
     const now = Date.now();
     const curlInterval = coachLevelRef.current === "easy" ? 14_000 : coachLevelRef.current === "hard" ? 6_000 : 8_000;
     const interval = exerciseIdRef.current === "bicep_curl" ? curlInterval : exerciseIdRef.current === "squat" ? 8_500 : exerciseIdRef.current === "dance_basic" ? 7_500 : 12_000;
-    if (now - lastCoachRef.current < interval) return;
-    if (triggerReason === "issue_changed" && lastCoachSignatureRef.current === cue.signature && now - lastCoachRef.current < 15_000) return;
+    if (triggerReason !== "manual" && now - lastCoachRef.current < interval) return;
+    if (triggerReason !== "manual" && triggerReason === "issue_changed" && lastCoachSignatureRef.current === cue.signature && now - lastCoachRef.current < 15_000) return;
     lastCoachRef.current = now;
     lastCoachSignatureRef.current = cue.signature;
+    setIsCoachRequesting(true);
     try {
       const response = await fetch("/api/coach/feedback", {
         method: "POST",
@@ -1320,12 +1355,42 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       const data = await parseApiResponse(response);
       if (response.ok && data?.feedback) {
         setCoachLine(data.feedback);
-        setCoachSource(data.provider === "groq" || data.provider === "openai" ? "llm" : "fallback");
+        setCoachSource(data.provider === "groq" || data.provider === "openai" ? data.provider : "fallback");
+        if (data.attemptedProvider) {
+          toast.warning(`${data.attemptedProvider} did not respond. Showing fallback feedback.`);
+        }
       } else if (!response.ok && (frame.corrections.length || frame.injuryRisks.length || frame.issues.length)) {
         setCoachLine(frame.injuryRisks[0] ?? frame.corrections[0] ?? frame.issues[0]);
         setCoachSource("fallback");
       }
-    } catch {}
+    } catch {
+      setCoachLine(frame.injuryRisks[0] ?? frame.corrections[0] ?? frame.issues[0] ?? "AI refinement is unavailable. Keep using the live rule cues.");
+      setCoachSource("fallback");
+    } finally {
+      setIsCoachRequesting(false);
+    }
+  };
+
+  const requestManualCoach = () => {
+    const frame = analysisRef.current;
+    const issue = frame.injuryRisks[0] ?? frame.corrections[0] ?? frame.issues[0] ?? feedbackRef.current ?? "Manual coach check";
+    const primaryMetric = frame.metrics[0];
+    const severity: FeedbackCue["severity"] = frame.injuryRisks.length ? "critical" : frame.corrections.length || frame.issues.length ? "warning" : "info";
+    const cue: FeedbackCue = {
+      message: issue,
+      secondaryNote: frame.secondaryNote || secondaryFeedback,
+      severity,
+      source: "system",
+      metricName: primaryMetric?.name,
+      score: primaryMetric?.score,
+      value: primaryMetric?.value,
+      target: primaryMetric?.target,
+      confidence: confidenceRef.current.avgVisibility,
+      side: "body",
+      phase: frame.phase,
+      signature: buildIssueSignature({ severity, message: `manual_${exerciseIdRef.current}_${issue}`, channel: "manual", side: "body" }),
+    };
+    void maybeCoach(frame, cue, "manual");
   };
 
   const handleTrackingFrame = (trackingFrame: TrackingFrame | null) => {
@@ -1365,10 +1430,14 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     confidenceRef.current = gate;
 
     if (!runningRef.current) {
-      const nextHoldProgress = gate.ready ? Math.min(calibrationHoldFramesRef.current + 1, 18) : 0;
+      const isFastStart = isFastStartExercise(currentId);
+      const requiredHoldFrames = calibrationFramesForExercise(currentId);
+      const fastUsableFrame = isFastStart && gate.avgVisibility >= 0.34 && gate.frameQuality !== "camera_lost";
+      const canAdvanceCalibration = gate.ready || fastUsableFrame;
+      const nextHoldProgress = canAdvanceCalibration ? Math.min(calibrationHoldFramesRef.current + 1, requiredHoldFrames) : 0;
       calibrationHoldFramesRef.current = nextHoldProgress;
       setCalibrationHoldProgress(nextHoldProgress);
-      if (currentId === "bicep_curl" && gate.ready) {
+      if (currentId === "bicep_curl" && canAdvanceCalibration) {
         curlCalibrationFramesRef.current = [...curlCalibrationFramesRef.current.slice(-30), trackingFrame];
         const nextBaseline = buildCurlBaseline(curlCalibrationFramesRef.current);
         curlBaselineRef.current = nextBaseline;
@@ -1389,8 +1458,11 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       return;
     }
 
-    const shouldPauseScoring = gate.pauseTracking || !gate.ready || gate.avgVisibility < 0.55;
-    const shouldPauseRepTracking = gate.frameQuality === "camera_lost" || gate.avgVisibility < 0.4;
+    const isFastStart = isFastStartExercise(currentId);
+    const shouldPauseScoring = isFastStart
+      ? gate.frameQuality === "camera_lost" || gate.avgVisibility < 0.32
+      : gate.pauseTracking || !gate.ready || gate.avgVisibility < 0.55;
+    const shouldPauseRepTracking = gate.frameQuality === "camera_lost" || gate.avgVisibility < (isFastStart ? 0.28 : 0.4);
     const pauseReason = shouldPauseScoring ? `${gate.message} Rep counting is paused until tracking recovers.` : null;
     setTrackingPausedReason(pauseReason);
     if (shouldPauseScoring) {
@@ -1445,6 +1517,19 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       landmarks: trackingFrame.smoothedLandmarks,
       analysis: resolved
     });
+    if (currentId === "squat" || currentId === "bicep_curl") {
+      const landmarkWindow = landmarksHistoryRef.current.slice(-18).map((point) => point.landmarks);
+      setMlPrediction(
+        evaluatePostureMl({
+          exerciseId: currentId,
+          phase: phaseUpdate.phase,
+          landmarkWindow,
+          confidence: trackingFrame.trackingConfidence,
+        }),
+      );
+    } else {
+      setMlPrediction(null);
+    }
     if (currentId === "bicep_curl") {
       curlFrameHistoryRef.current = [...curlFrameHistoryRef.current.slice(-180), { timestampMs: now, analysis: resolved }];
     }
@@ -1545,7 +1630,11 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       const cameraInfo = await cameraControllerRef.current.start("desktop_hq");
       setCameraProfileLabel(cameraInfo.profile.label);
       setCameraOn(true);
-      showStatus(`${cameraInfo.profile.label} active. Finish calibration before starting the session.`);
+      showStatus(
+        isFastStartExercise(exerciseIdRef.current)
+          ? `${cameraInfo.profile.label} active. Fast start is available now.`
+          : `${cameraInfo.profile.label} active. Finish calibration before starting the session.`,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to access camera";
       pushTelemetry({ timestampMs: 0, type: "camera_start_failure", message });
@@ -1591,17 +1680,22 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
 
   const startSession = () => {
     if (!cameraOn) return;
-    if (!confidence.ready || calibrationHoldFramesRef.current < 18) {
+    const isFastStart = isFastStartExercise(exerciseIdRef.current);
+    const requiredHoldFrames = calibrationFramesForExercise(exerciseIdRef.current);
+    if (!isFastStart && (!confidence.ready || calibrationHoldFramesRef.current < requiredHoldFrames)) {
       const message = confidence.ready ? "Hold steady in the ready position for one more moment before starting." : confidence.message;
       pushTelemetry({ timestampMs: 0, type: "calibration_blocked", message, meta: { frameQuality: confidence.frameQuality, view: confidence.view } });
       toast.error(message);
       return;
     }
-    if (exerciseIdRef.current === "bicep_curl" && coachLevelRef.current === "hard" && !curlBaselineRef.current?.ready) {
-      const message = curlBaselineRef.current?.message ?? "Hold a stable curl setup for a moment so hard mode can calibrate.";
-      pushTelemetry({ timestampMs: 0, type: "calibration_blocked", message, meta: { exerciseId: "bicep_curl", coachingLevel: "hard" } });
-      toast.error(message);
-      return;
+    if (exerciseIdRef.current === "dance_basic" && !confidence.ready) {
+      pushTelemetry({ timestampMs: 0, type: "calibration_ready", message: "Fast dance start enabled. Timing and reliability will improve as tracking settles.", meta: { exerciseId: "dance_basic", fastStart: true } });
+      toast.warning("Fast dance start enabled. Keep your full body visible for better timing scores.");
+    }
+    if (exerciseIdRef.current === "bicep_curl" && !curlBaselineRef.current?.ready) {
+      const message = curlBaselineRef.current?.message ?? "Fast curl start enabled. Baseline will keep improving during the first reps.";
+      pushTelemetry({ timestampMs: 0, type: "calibration_ready", message, meta: { exerciseId: "bicep_curl", coachingLevel: coachLevelRef.current, fastStart: true } });
+      toast.warning("Fast curl start enabled. The coach will refine calibration during your first reps.");
     }
     const sessionCurlBaseline = curlBaselineRef.current;
     reset();
@@ -2118,8 +2212,18 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   }, [replayFrameIndex, running, hudMode]);
 
   const qualityPercent = useMemo(() => Math.round(confidence.avgVisibility * 100), [confidence.avgVisibility]);
-  const calibrationReady = cameraOn && confidence.ready && calibrationHoldProgress >= 18;
-  const calibrationMessage = confidence.ready && calibrationHoldProgress < 18 ? "Hold steady so the coach can lock onto your setup." : confidence.message;
+  const requiredCalibrationFrames = calibrationFramesForExercise(exerciseId);
+  const calibrationReady = isFastStartExercise(exerciseId) ? cameraOn : cameraOn && confidence.ready && calibrationHoldProgress >= requiredCalibrationFrames;
+  const calibrationMessage =
+    exerciseId === "bicep_curl" && cameraOn
+      ? curlBaseline?.ready
+        ? "Curl coach is ready. You can start now; calibration keeps refining during reps."
+        : "Fast curl start is enabled. Start now, then keep shoulders, elbows, and wrists visible."
+      : exerciseId === "dance_basic" && cameraOn
+        ? "Fast dance start is enabled. Start now; phrase timing and reliability will refine as you move."
+      : confidence.ready && calibrationHoldProgress < requiredCalibrationFrames
+        ? "Hold steady so the coach can lock onto your setup."
+        : confidence.message;
   const activeDanceCheckpoint = useMemo(() => getActiveDanceCheckpoint(danceRoutine, seconds * 1000), [danceRoutine, seconds]);
   const exerciseDescription = useMemo(() => exercise.tips.join(" • "), [exercise]);
   const scorecard = useMemo(() => {
@@ -2140,6 +2244,20 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     [exerciseId, scorecard],
   );
   const primaryMetrics = useMemo(() => analysis.metrics.slice(0, 6), [analysis.metrics]);
+  const mlMistakeRows = useMemo(
+    () =>
+      mlPrediction
+        ? Object.entries(mlPrediction.mistakeProbabilities)
+            .map(([key, probability]) => ({
+              key: key as PostureMistakeClass,
+              label: ML_MISTAKE_LABELS[key as PostureMistakeClass],
+              probability,
+            }))
+            .sort((a, b) => b.probability - a.probability)
+            .slice(0, 4)
+        : [],
+    [mlPrediction],
+  );
   const liveIssues = useMemo(() => [...analysis.injuryRisks, ...analysis.corrections, ...analysis.issues].slice(0, 5), [analysis]);
   const coachLevelDetail = useMemo(() => COACH_LEVELS.find((item) => item.id === coachLevel)?.detail ?? COACH_LEVELS[1].detail, [coachLevel]);
   const curlEvidence = useMemo(() => (exerciseId === "bicep_curl" ? summarizeCurlEvidence(curlRepScorecards) : null), [curlRepScorecards, exerciseId]);
@@ -2519,9 +2637,22 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                   </div>
                 ) : null}
                 <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-                  <div className="flex items-center gap-2">
-                    <Mic className="h-4 w-4 text-cyan-300" />
-                    <p className="text-sm font-medium text-zinc-200">AI refinement {coachSource ? `(${coachSource})` : ""}</p>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <Mic className="h-4 w-4 text-cyan-300" />
+                      <p className="text-sm font-medium text-zinc-200">AI refinement {coachSource ? `(${coachSource})` : ""}</p>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 border-cyan-400/30 bg-cyan-400/10 px-3 text-xs text-cyan-100 hover:bg-cyan-400/20"
+                      disabled={isCoachRequesting}
+                      onClick={requestManualCoach}
+                    >
+                      <Brain className="mr-1.5 h-3.5 w-3.5" />
+                      {isCoachRequesting ? "Asking" : "Ask AI"}
+                    </Button>
                   </div>
                   <p className="mt-2 text-sm text-zinc-300">{coachLine || "The grounded rule + ML evidence layer is active. AI refinement appears on meaningful changes and post-set summaries, without medical diagnosis."}</p>
                 </div>
@@ -2575,7 +2706,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                       ))}
                     </div>
                     {coachLevel === "hard" && !curlBaseline?.ready ? (
-                      <p className="mt-3 text-xs text-amber-200">Hard mode stays locked until the curl baseline is reliable enough to judge small errors.</p>
+                      <p className="mt-3 text-xs text-amber-200">Hard mode can start now; small-error judging gets sharper as the curl baseline fills in.</p>
                     ) : null}
                   </div>
                 ) : null}
@@ -2677,6 +2808,51 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                 <CardDescription className="text-zinc-400">The live score combines measured movement metrics with research-grade ML evidence. It is not a medical-device assessment.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                {exerciseId === "squat" || exerciseId === "bicep_curl" ? (
+                  <div className="rounded-2xl border border-cyan-500/25 bg-cyan-500/10 p-4">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <Brain className="h-4 w-4 text-cyan-200" />
+                          <p className="text-sm font-medium text-cyan-100">ML posture evaluator</p>
+                        </div>
+                        <p className="mt-2 text-sm text-zinc-300">
+                          {mlPrediction
+                            ? mlPrediction.suppressed
+                              ? "ML posture claims are suppressed because camera confidence is too low."
+                              : `Predicted movement quality ${mlPrediction.predictedQuality}/100 from recent landmark-window features.`
+                            : "Start the camera to collect landmark-window features for ML posture scoring."}
+                        </p>
+                      </div>
+                      <div className="grid min-w-40 grid-cols-2 gap-2 text-center">
+                        <div className="rounded-xl border border-cyan-400/20 bg-zinc-950/50 p-3">
+                          <p className="text-xs text-zinc-500">Quality</p>
+                          <p className={cn("mt-1 text-xl font-semibold", text(mlPrediction?.predictedQuality ?? 0))}>{mlPrediction?.predictedQuality ?? "--"}</p>
+                        </div>
+                        <div className="rounded-xl border border-cyan-400/20 bg-zinc-950/50 p-3">
+                          <p className="text-xs text-zinc-500">Confidence</p>
+                          <p className="mt-1 text-xl font-semibold text-cyan-200">{mlPrediction ? `${Math.round(mlPrediction.modelConfidence * 100)}%` : "--"}</p>
+                        </div>
+                      </div>
+                    </div>
+                    {mlMistakeRows.length ? (
+                      <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                        {mlMistakeRows.map((item) => (
+                          <div key={item.key} className="rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2">
+                            <div className="flex items-center justify-between gap-3 text-sm">
+                              <span className="font-medium text-zinc-100">{item.label}</span>
+                              <span className="text-cyan-200">{Math.round(item.probability * 100)}%</span>
+                            </div>
+                            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-zinc-800">
+                              <div className="h-full rounded-full bg-cyan-400" style={{ width: `${Math.round(item.probability * 100)}%` }} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                    <p className="mt-3 text-xs text-zinc-500">Model: {mlPrediction?.modelVersion ?? "research-grade-seed-v0"} • evidence-only coaching, not diagnosis</p>
+                  </div>
+                ) : null}
                 <div className="grid gap-3 sm:grid-cols-2">
                   {scorecardRows.map((item) => (
                     <div key={item.label} className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
@@ -2711,7 +2887,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                         <p className="mt-2 text-sm text-zinc-300">
                           {curlBaseline?.ready
                             ? `Baseline locked at ${Math.round(curlBaseline.confidence * 100)}% confidence.`
-                            : curlBaseline?.message ?? "Enable camera and hold a stable curl setup to lock the baseline."}
+                            : curlBaseline?.message ?? "Start curls now; keep shoulders, elbows, wrists, and hips visible so the baseline improves."}
                         </p>
                       </div>
                       <Badge className={cn("w-fit", curlBaseline?.ready ? "bg-emerald-500/15 text-emerald-300" : "bg-amber-500/15 text-amber-300")}>

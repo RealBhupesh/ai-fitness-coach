@@ -3,7 +3,7 @@ import { currentUser } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
 import { headers } from "next/headers";
 import { NextRequest } from "next/server";
-import { db } from "@/db";
+import { db, isDatabaseConfigured } from "@/db";
 import { users } from "@/db/schema";
 import { auth } from "@/lib/auth/config";
 import { isClerkAuthEnabled } from "@/lib/env";
@@ -38,8 +38,29 @@ async function getClerkServerSession() {
 
     const name = user.fullName || user.username || email.split("@")[0] || "FitCoach user";
     const image = user.imageUrl || null;
-    const existingByEmail = await db.query.users.findFirst({ where: eq(users.email, email) });
     const now = new Date();
+
+    if (!isDatabaseConfigured) {
+      const id = `clerk:${user.id}`;
+      return {
+        session: {
+          id,
+          userId: id,
+          expiresAt: new Date(now.getTime() + 60 * 60 * 24 * 7 * 1000),
+        },
+        user: {
+          id,
+          email,
+          name,
+          image,
+          emailVerified: Boolean(user.primaryEmailAddress?.verification?.status === "verified"),
+          createdAt: now,
+          updatedAt: now,
+        },
+      };
+    }
+
+    const existingByEmail = await db.query.users.findFirst({ where: eq(users.email, email) });
 
     if (existingByEmail) {
       await db
@@ -95,18 +116,20 @@ async function getClerkServerSession() {
 
 export async function getServerSession(source?: RequestLike) {
   const requestHeaders = source ? toHeaders(source) : new Headers(await headers());
+  const cookieHeader = requestHeaders.get("cookie") || "";
+
+  if (hasDemoCookie(cookieHeader)) {
+    return buildDemoServerSession() as any;
+  }
 
   const clerkSession = await getClerkServerSession();
   if (clerkSession?.user?.id) return clerkSession;
 
-  try {
-    const session = await auth.api.getSession({ headers: requestHeaders });
-    if (session?.user?.id) return session;
-  } catch {}
-
-  const cookieHeader = requestHeaders.get("cookie") || "";
-  if (hasDemoCookie(cookieHeader)) {
-    return buildDemoServerSession() as any;
+  if (isDatabaseConfigured) {
+    try {
+      const session = await auth.api.getSession({ headers: requestHeaders });
+      if (session?.user?.id) return session;
+    } catch {}
   }
 
   return null;

@@ -7,6 +7,18 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const envState = validateServerEnv();
 
+  if (!dbPool) {
+    return NextResponse.json({
+      ok: envState.ok,
+      database: "disabled",
+      env: envState.ok ? "configured" : envState.invalid.length > 0 ? "invalid" : "missing",
+      missing: envState.missing,
+      invalid: envState.invalid,
+      warnings: envState.warnings,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   try {
     await dbPool.query("select 1");
 

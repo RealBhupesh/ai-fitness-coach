@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { db } from "@/db";
+import { db, isDatabaseConfigured } from "@/db";
 import { userProfiles, users } from "@/db/schema";
-import { getAppProfile, toProfileDbInput } from "@/lib/server/app-data";
+import { clearFallbackAppProfile, getAppProfile, saveFallbackAppProfile, toProfileDbInput } from "@/lib/server/app-data";
 import { requireServerSession } from "@/lib/auth/session";
 import { isDemoUser, DEMO_PROFILE_COOKIE_NAME, buildDemoProfile, getDemoProfileFromCookie, saveDemoProfile, clearDemoProfile } from "@/lib/dummy-auth";
 import { guardMutationRequest, getRequestIp } from "@/lib/security/request-guard";
@@ -62,6 +62,12 @@ export async function POST(request: Request) {
       });
       return response;
     }
+
+    if (!isDatabaseConfigured) {
+      const profile = saveFallbackAppProfile(session.user.id, payload);
+      return NextResponse.json({ message: "Profile updated (demo deployment)", profile });
+    }
+
     const profileData = toProfileDbInput(payload);
     const existing = await db.query.userProfiles.findFirst({
       where: eq(userProfiles.userId, session.user.id),
@@ -120,6 +126,12 @@ export async function DELETE(request: Request) {
       });
       return response;
     }
+
+    if (!isDatabaseConfigured) {
+      const profile = clearFallbackAppProfile(session.user.id);
+      return NextResponse.json({ message: "Profile reset", profile });
+    }
+
     await db.delete(userProfiles).where(eq(userProfiles.userId, session.user.id));
     const profile = await getAppProfile(session.user.id);
     return NextResponse.json({ message: "Profile reset", profile });

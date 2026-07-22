@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { useEffect, useState } from "react";
 import { AICoachChat } from "@/components/AICoachChat";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,8 +17,33 @@ const capabilities = [
   { icon: Brain, label: "Motivation", description: "Session-aware encouragement and next steps" },
 ];
 
+type ProviderStatus = {
+  activeProvider: "groq" | "openai" | "fallback";
+  activeModel: string;
+  configured: boolean;
+};
+
 export default function ChatPage() {
   const { loading, profile } = useUserProfile();
+  const [providerStatus, setProviderStatus] = useState<ProviderStatus | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadStatus = async () => {
+      try {
+        const response = await fetch("/api/ai/status", { credentials: "include" });
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!cancelled) setProviderStatus(data);
+      } catch {
+        if (!cancelled) setProviderStatus(null);
+      }
+    };
+    void loadStatus();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   if (loading) {
     return (
@@ -35,9 +61,11 @@ export default function ChatPage() {
             <CircleGauge className="h-5 w-5 text-primary" />
           </div>
           <h1 className="text-3xl font-black uppercase md:text-5xl">AI Fitness Coach</h1>
-          <Badge>
+          <Badge variant={providerStatus?.configured ? "default" : "outline"}>
             <Zap className="h-3 w-3 mr-1" />
-            Groq-ready coach
+            {providerStatus?.configured
+              ? `${providerStatus.activeProvider} · ${providerStatus.activeModel}`
+              : "Fallback coach"}
           </Badge>
         </div>
         <p className="text-muted-foreground">

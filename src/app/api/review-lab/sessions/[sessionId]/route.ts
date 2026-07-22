@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { db } from "@/db";
+import { db, isDatabaseConfigured } from "@/db";
 import { exerciseReps, sessionFeedbackEvents, workoutSessions } from "@/db/schema";
 import { requireServerSession } from "@/lib/auth/session";
 import { isDemoUser } from "@/lib/dummy-auth";
@@ -12,7 +12,7 @@ export async function GET(request: Request, context: { params: Promise<{ session
     const authSession = await requireServerSession(request);
     const { sessionId } = await context.params;
 
-    if (isDemoUser(authSession.user.id)) {
+    if (isDemoUser(authSession.user.id) || !isDatabaseConfigured) {
       const report = getDemoReviewLabReport(sessionId);
       return report ? NextResponse.json({ report }) : NextResponse.json({ error: "Not found" }, { status: 404 });
     }

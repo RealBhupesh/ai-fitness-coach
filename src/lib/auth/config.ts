@@ -1,6 +1,6 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { db } from "@/db";
+import { db, isDatabaseConfigured } from "@/db";
 import * as schema from "@/db/schema";
 import { describeServerEnvState, getAppBaseUrl, getTrustedOrigins, validateServerEnv } from "@/lib/env";
 
@@ -11,15 +11,19 @@ if (!envState.ok) {
 }
 
 export const auth = betterAuth({
-  database: drizzleAdapter(db, {
-    provider: "pg",
-    schema: {
-      user: schema.users,
-      session: schema.sessions,
-      account: schema.accounts,
-      verification: schema.verificationTokens,
-    },
-  }),
+  ...(isDatabaseConfigured
+    ? {
+        database: drizzleAdapter(db, {
+          provider: "pg",
+          schema: {
+            user: schema.users,
+            session: schema.sessions,
+            account: schema.accounts,
+            verification: schema.verificationTokens,
+          },
+        }),
+      }
+    : {}),
   emailAndPassword: {
     enabled: true,
     requireEmailVerification: false, // Set to true in production with email service

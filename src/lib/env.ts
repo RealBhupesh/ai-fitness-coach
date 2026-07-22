@@ -53,7 +53,7 @@ export function isClerkAuthEnabled() {
 }
 
 export function validateServerEnv() {
-  const missing = ["DATABASE_URL", "BETTER_AUTH_SECRET"].filter((key) => !process.env[key]);
+  const missing = ["BETTER_AUTH_SECRET"].filter((key) => !process.env[key]);
   const invalid: string[] = [];
   const warnings: string[] = [];
 
@@ -84,6 +84,9 @@ export function validateServerEnv() {
   }
   if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY && process.env.CLERK_SECRET_KEY) {
     invalid.push("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY");
+  }
+  if (!process.env.DATABASE_URL) {
+    warnings.push("Database disabled; app will use demo/fallback data only");
   }
 
   return {

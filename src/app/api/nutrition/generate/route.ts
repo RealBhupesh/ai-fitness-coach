@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { NextResponse } from "next/server";
-import { db } from "@/db";
+import { db, isDatabaseConfigured } from "@/db";
 import { nutritionPlans } from "@/db/schema";
 import { generateNutritionPlan } from "@/lib/ai/coach";
 import { requireServerSession } from "@/lib/auth/session";
@@ -29,43 +29,6 @@ export async function POST(request: Request) {
     const generated = await generateNutritionPlan(profile);
     const planData = generated.plan;
 
-    if (isDemoUser(session.user.id)) {
-      const record = {
-        id: nanoid(),
-        userId: session.user.id,
-        name: `${profile?.goals[0] ?? "balanced"} nutrition plan`,
-        description: "Structured plan generated from your current profile and goals.",
-        dailyCalories: planData.dailyCalories,
-        proteinGrams: planData.macros.proteinGrams,
-        carbsGrams: planData.macros.carbsGrams,
-        fatGrams: planData.macros.fatGrams,
-        meals: toJson(planData.meals),
-        hydrationLiters: planData.hydration.dailyLiters,
-        mealTiming: toJson(planData.hydration.reminders),
-        groceryList: toJson(planData.groceryList),
-        cuisineType: profile?.cuisinePreference ?? "balanced",
-        budgetTier: profile?.budgetTier ?? "medium",
-        isActive: true,
-        isAiGenerated: true,
-        createdAt: new Date(),
-      };
-      saveDemoNutritionPlan(record);
-      const response = NextResponse.json({ plan: planData, record, provider: generated.provider, model: generated.model });
-      response.cookies.set(DEMO_NUTRITION_PLAN_COOKIE_NAME, encodeURIComponent(JSON.stringify(record)), {
-        path: "/",
-        maxAge: 60 * 60 * 24 * 30,
-        sameSite: "lax",
-      });
-      return response;
-    }
-
-    const existingActive = await db.query.nutritionPlans.findFirst({
-      where: and(eq(nutritionPlans.userId, session.user.id), eq(nutritionPlans.isActive, true)),
-    });
-    if (existingActive) {
-      await db.update(nutritionPlans).set({ isActive: false }).where(eq(nutritionPlans.id, existingActive.id));
-    }
-
     const record = {
       id: nanoid(),
       userId: session.user.id,
@@ -85,6 +48,28 @@ export async function POST(request: Request) {
       isAiGenerated: true,
       createdAt: new Date(),
     };
+
+    if (isDemoUser(session.user.id)) {
+      saveDemoNutritionPlan(record);
+      const response = NextResponse.json({ plan: planData, record, provider: generated.provider, model: generated.model });
+      response.cookies.set(DEMO_NUTRITION_PLAN_COOKIE_NAME, encodeURIComponent(JSON.stringify(record)), {
+        path: "/",
+        maxAge: 60 * 60 * 24 * 30,
+        sameSite: "lax",
+      });
+      return response;
+    }
+
+    if (!isDatabaseConfigured) {
+      return NextResponse.json({ plan: planData, record, provider: generated.provider, model: generated.model });
+    }
+
+    const existingActive = await db.query.nutritionPlans.findFirst({
+      where: and(eq(nutritionPlans.userId, session.user.id), eq(nutritionPlans.isActive, true)),
+    });
+    if (existingActive) {
+      await db.update(nutritionPlans).set({ isActive: false }).where(eq(nutritionPlans.id, existingActive.id));
+    }
 
     await db.insert(nutritionPlans).values(record);
     return NextResponse.json({ plan: planData, record, provider: generated.provider, model: generated.model });

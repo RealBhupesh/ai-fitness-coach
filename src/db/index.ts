@@ -10,25 +10,35 @@ function shouldUseSsl(connectionString: string) {
   return !/localhost|127\.0\.0\.1/i.test(connectionString);
 }
 
-const connectionString = process.env.DATABASE_URL;
+export const isDatabaseConfigured = Boolean(process.env.DATABASE_URL?.trim());
 
-if (!connectionString) {
-  throw new Error("DATABASE_URL is required. Configure a PostgreSQL connection before starting the app.");
+function createUnavailableDatabase() {
+  return new Proxy(
+    {},
+    {
+      get() {
+        throw new Error("DATABASE_UNAVAILABLE");
+      },
+    },
+  ) as ReturnType<typeof drizzle<typeof schema>>;
 }
 
-const pool =
-  globalThis.__fitcoachPool ??
-  new Pool({
-    connectionString,
-    ssl: shouldUseSsl(connectionString) ? { rejectUnauthorized: false } : undefined,
-    max: 10,
-  });
+const connectionString = process.env.DATABASE_URL?.trim();
 
-if (process.env.NODE_ENV !== "production") {
+const pool = connectionString
+  ? globalThis.__fitcoachPool ??
+    new Pool({
+      connectionString,
+      ssl: shouldUseSsl(connectionString) ? { rejectUnauthorized: false } : undefined,
+      max: 10,
+    })
+  : null;
+
+if (pool && process.env.NODE_ENV !== "production") {
   globalThis.__fitcoachPool = pool;
 }
 
-export const db = drizzle(pool, { schema });
+export const db = pool ? drizzle(pool, { schema }) : createUnavailableDatabase();
 export const dbPool = pool;
 
 export * from "./schema";

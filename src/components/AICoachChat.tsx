@@ -17,6 +17,16 @@ interface Message {
   createdAt: string;
 }
 
+interface ProviderStatus {
+  configured: boolean;
+  activeProvider: "groq" | "openai" | "fallback";
+  activeModel: string;
+  groqConfigured: boolean;
+  openaiConfigured: boolean;
+  groqModel: string;
+  openaiModel: string;
+}
+
 const quickPrompts = [
   { icon: Dumbbell, label: "Plan today’s workout", prompt: "Plan today’s workout based on my saved profile and recent progress." },
   { icon: Utensils, label: "Adjust my meals", prompt: "Adjust today’s meals so I stay aligned with my current goal and training load." },
@@ -30,6 +40,8 @@ export function AICoachChat({ className }: { className?: string }) {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+  const [providerStatus, setProviderStatus] = useState<ProviderStatus | null>(null);
+  const [providerNotice, setProviderNotice] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -37,10 +49,15 @@ export function AICoachChat({ className }: { className?: string }) {
     let cancelled = false;
     const load = async () => {
       try {
-        const response = await fetch("/api/chat", { credentials: "include" });
-        const data = await response.json();
+        const [historyResponse, statusResponse] = await Promise.all([
+          fetch("/api/chat", { credentials: "include" }),
+          fetch("/api/ai/status", { credentials: "include" }),
+        ]);
+        const data = await historyResponse.json();
+        const statusData = statusResponse.ok ? await statusResponse.json() : null;
         if (!cancelled) {
           setMessages(data.messages ?? []);
+          if (statusData) setProviderStatus(statusData);
         }
       } finally {
         if (!cancelled) {
@@ -80,6 +97,24 @@ export function AICoachChat({ className }: { className?: string }) {
         body: JSON.stringify({ message }),
       });
       const data = await response.json();
+      if (data?.provider) {
+        const activeProvider: ProviderStatus["activeProvider"] =
+          data.provider === "groq" || data.provider === "openai" ? data.provider : "fallback";
+        setProviderStatus((current) => ({
+          configured: data.provider !== "fallback" || Boolean(data.attemptedProvider) || Boolean(current?.configured),
+          activeProvider,
+          activeModel: data.model ?? current?.activeModel ?? "fallback",
+          groqConfigured: current?.groqConfigured ?? data.attemptedProvider === "groq",
+          openaiConfigured: current?.openaiConfigured ?? data.attemptedProvider === "openai",
+          groqModel: current?.groqModel ?? (data.attemptedProvider === "groq" ? data.attemptedModel : "openai/gpt-oss-20b"),
+          openaiModel: current?.openaiModel ?? (data.attemptedProvider === "openai" ? data.attemptedModel : "gpt-4o-mini"),
+        }));
+      }
+      setProviderNotice(
+        response.ok && data?.attemptedProvider
+          ? `${data.attemptedProvider} did not respond, so the local fallback coach answered.`
+          : "",
+      );
       const assistantText = response.ok
         ? (data.message ?? "I could not generate a reply right now.")
         : (data.error ? `Coach error: ${data.error}` : "I could not generate a reply right now.");
@@ -125,7 +160,7 @@ export function AICoachChat({ className }: { className?: string }) {
   }
 
   return (
-    <Card className={cn("flex flex-col overflow-hidden", className)}>
+    <Card className={cn("flex min-h-0 flex-col overflow-hidden", className)}>
       <div className="border-b p-4">
         <div className="flex items-center gap-3">
           <div className="rounded-full border border-primary/30 bg-primary/10 p-2">
@@ -138,9 +173,16 @@ export function AICoachChat({ className }: { className?: string }) {
             </p>
           </div>
         </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+          <span className={cn("rounded-full border px-2.5 py-1 font-medium uppercase tracking-[0.12em]", providerStatus?.activeProvider === "fallback" ? "border-amber-300/40 bg-amber-300/10 text-amber-700 dark:text-amber-200" : "border-emerald-300/40 bg-emerald-300/10 text-emerald-700 dark:text-emerald-200")}>
+            {providerStatus ? `${providerStatus.activeProvider} · ${providerStatus.activeModel}` : "checking provider"}
+          </span>
+          {providerNotice ? <span className="text-muted-foreground">{providerNotice}</span> : null}
+          {!providerStatus?.configured ? <span className="text-muted-foreground">Add `GROQ_API_KEY` in `.env.local` and restart dev server for live LLM replies.</span> : null}
+        </div>
       </div>
 
-      <ScrollArea className="flex-1">
+      <ScrollArea className="min-h-0 flex-1 overflow-hidden">
         <div className="p-4 space-y-4">
           {messages.length === 0 ? (
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="text-center py-8">

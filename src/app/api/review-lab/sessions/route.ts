@@ -1,6 +1,6 @@
 import { desc, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { db } from "@/db";
+import { db, isDatabaseConfigured } from "@/db";
 import { exerciseReps, sessionFeedbackEvents, workoutSessions } from "@/db/schema";
 import { requireServerSession } from "@/lib/auth/session";
 import { isDemoUser } from "@/lib/dummy-auth";
@@ -10,7 +10,7 @@ import { getDemoReviewLabReports } from "@/lib/review-lab/demo-fixtures";
 export async function GET(request: Request) {
   try {
     const session = await requireServerSession(request);
-    if (isDemoUser(session.user.id)) {
+    if (isDemoUser(session.user.id) || !isDatabaseConfigured) {
       return NextResponse.json({ sessions: getDemoReviewLabReports().map(summarizeReviewLabReport) });
     }
 

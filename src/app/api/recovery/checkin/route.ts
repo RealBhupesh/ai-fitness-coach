@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { nanoid } from "nanoid";
 import { desc, eq } from "drizzle-orm";
-import { db } from "@/db";
+import { db, isDatabaseConfigured } from "@/db";
 import { progressTracking } from "@/db/schema";
 import { requireServerSession } from "@/lib/auth/session";
 import { isDemoUser } from "@/lib/dummy-auth";
@@ -33,7 +33,7 @@ function recoveryPayload(body: Record<string, unknown>) {
 export async function GET(request: Request) {
   try {
     const session = await requireServerSession(request);
-    if (isDemoUser(session.user.id)) {
+    if (isDemoUser(session.user.id) || !isDatabaseConfigured) {
       return NextResponse.json({
         recoveryCheckIn: {
           sleepHours: 7.3,
@@ -80,7 +80,7 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({}));
     const payload = recoveryPayload(body && typeof body === "object" ? body : {});
 
-    if (isDemoUser(session.user.id)) {
+    if (isDemoUser(session.user.id) || !isDatabaseConfigured) {
       return NextResponse.json(payload);
     }
 

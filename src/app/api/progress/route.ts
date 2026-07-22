@@ -1,7 +1,7 @@
 import { desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { NextResponse } from "next/server";
-import { db } from "@/db";
+import { db, isDatabaseConfigured } from "@/db";
 import { progressTracking, workoutSessions } from "@/db/schema";
 import { requireServerSession } from "@/lib/auth/session";
 import { guardMutationRequest, getRequestIp } from "@/lib/security/request-guard";
@@ -12,6 +12,14 @@ import { parseJsonObject, toJson } from "@/lib/utils/json";
 export async function GET(request: Request) {
   try {
     const session = await requireServerSession(request);
+    if (!isDatabaseConfigured) {
+      return NextResponse.json({
+        entries: [],
+        streak: 5,
+        totalSessions: 12,
+        avgScore: 84,
+      });
+    }
     const [entries, workouts] = await Promise.all([
       db.query.progressTracking.findMany({
         where: eq(progressTracking.userId, session.user.id),
@@ -70,6 +78,10 @@ export async function POST(request: Request) {
     }
 
     const data = parsed.data;
+    if (!isDatabaseConfigured) {
+      return NextResponse.json({ message: "Progress saved successfully (demo mode)" });
+    }
+
     await db.insert(progressTracking).values({
       id: nanoid(),
       userId: session.user.id,

@@ -1,7 +1,7 @@
 import { desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { NextResponse } from "next/server";
-import { db } from "@/db";
+import { db, isDatabaseConfigured } from "@/db";
 import { chatMessages, chatSessions } from "@/db/schema";
 import { requireServerSession } from "@/lib/auth/session";
 import { buildDemoProfile, getDemoNutritionPlanFromCookie, getDemoProfileFromCookie, getDemoWorkoutPlanFromCookie, isDemoUser } from "@/lib/dummy-auth";
@@ -41,6 +41,9 @@ export async function GET(request: Request) {
   try {
     const session = await requireServerSession(request);
     if (isDemoUser(session.user.id)) {
+      return NextResponse.json({ messages: [] });
+    }
+    if (!isDatabaseConfigured) {
       return NextResponse.json({ messages: [] });
     }
     const messages = await db.query.chatMessages.findMany({
@@ -112,6 +115,39 @@ export async function POST(request: Request) {
         message: generated.message,
         tokens: generated.tokens,
         provider: generated.provider,
+        model: generated.model,
+        attemptedProvider: generated.attemptedProvider,
+        attemptedModel: generated.attemptedModel,
+        providerError: generated.error,
+      });
+    }
+
+    if (!isDatabaseConfigured) {
+      const [profile, dashboard] = await Promise.all([
+        getAppProfile(session.user.id),
+        getDashboardSummary(session.user.id),
+      ]);
+      const generated = await generateCoachMessage({
+        profile,
+        recentMessages: [],
+        sessionSummary: "Database-free demo chat session",
+        sessionContext: buildFitnessContext({
+          profileName: profile?.name,
+          recentSessions: dashboard.recentSessions,
+          activePlan: dashboard.activePlan,
+          activeNutritionPlan: dashboard.activeNutritionPlan,
+        }),
+        userMessage: parsed.data.message,
+      });
+
+      return NextResponse.json({
+        message: generated.message,
+        tokens: generated.tokens,
+        provider: generated.provider,
+        model: generated.model,
+        attemptedProvider: generated.attemptedProvider,
+        attemptedModel: generated.attemptedModel,
+        providerError: generated.error,
       });
     }
 
@@ -161,6 +197,9 @@ export async function POST(request: Request) {
           provider: generated.provider,
           model: generated.model,
           tokens: generated.tokens,
+          attemptedProvider: generated.attemptedProvider,
+          attemptedModel: generated.attemptedModel,
+          providerError: generated.error,
         }),
         createdAt: new Date(),
       },
@@ -185,6 +224,10 @@ export async function POST(request: Request) {
       message: generated.message,
       tokens: generated.tokens,
       provider: generated.provider,
+      model: generated.model,
+      attemptedProvider: generated.attemptedProvider,
+      attemptedModel: generated.attemptedModel,
+      providerError: generated.error,
     });
   } catch (error) {
     const status = error instanceof Error && error.message === "UNAUTHORIZED" ? 401 : 500;

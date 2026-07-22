@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { NextResponse } from "next/server";
-import { db } from "@/db";
+import { db, isDatabaseConfigured } from "@/db";
 import { workoutPlans } from "@/db/schema";
 import { generateWorkoutPlan } from "@/lib/ai/coach";
 import { requireServerSession } from "@/lib/auth/session";
@@ -29,42 +29,7 @@ export async function POST(request: Request) {
     const generated = await generateWorkoutPlan(profile);
     const planData = generated.plan;
 
-    if (isDemoUser(session.user.id)) {
-      const record = {
-        id: nanoid(),
-        userId: session.user.id,
-        name: planData.name,
-        description: planData.description,
-        goal: planData.goal,
-        duration: planData.duration,
-        daysPerWeek: planData.daysPerWeek,
-        difficulty: planData.difficulty,
-        weeklySchedule: toJson(planData.weeklySchedule),
-        progressionRules: toJson(planData.progressionRules),
-        regressionRules: toJson(planData.regressionRules),
-        isActive: true,
-        isAiGenerated: true,
-        createdAt: new Date(),
-      };
-      saveDemoWorkoutPlan(record);
-      const response = NextResponse.json({ plan: planData, record, provider: generated.provider, model: generated.model });
-      response.cookies.set(DEMO_WORKOUT_PLAN_COOKIE_NAME, encodeURIComponent(JSON.stringify(record)), {
-        path: "/",
-        maxAge: 60 * 60 * 24 * 30,
-        sameSite: "lax",
-      });
-      return response;
-    }
-
-    const existingActive = await db.query.workoutPlans.findFirst({
-      where: and(eq(workoutPlans.userId, session.user.id), eq(workoutPlans.isActive, true)),
-    });
-
-    if (existingActive) {
-      await db.update(workoutPlans).set({ isActive: false }).where(eq(workoutPlans.id, existingActive.id));
-    }
-
-    const plan = {
+    const record = {
       id: nanoid(),
       userId: session.user.id,
       name: planData.name,
@@ -81,8 +46,31 @@ export async function POST(request: Request) {
       createdAt: new Date(),
     };
 
-    await db.insert(workoutPlans).values(plan);
-    return NextResponse.json({ plan: planData, record: plan, provider: generated.provider, model: generated.model });
+    if (isDemoUser(session.user.id)) {
+      saveDemoWorkoutPlan(record);
+      const response = NextResponse.json({ plan: planData, record, provider: generated.provider, model: generated.model });
+      response.cookies.set(DEMO_WORKOUT_PLAN_COOKIE_NAME, encodeURIComponent(JSON.stringify(record)), {
+        path: "/",
+        maxAge: 60 * 60 * 24 * 30,
+        sameSite: "lax",
+      });
+      return response;
+    }
+
+    if (!isDatabaseConfigured) {
+      return NextResponse.json({ plan: planData, record, provider: generated.provider, model: generated.model });
+    }
+
+    const existingActive = await db.query.workoutPlans.findFirst({
+      where: and(eq(workoutPlans.userId, session.user.id), eq(workoutPlans.isActive, true)),
+    });
+
+    if (existingActive) {
+      await db.update(workoutPlans).set({ isActive: false }).where(eq(workoutPlans.id, existingActive.id));
+    }
+
+    await db.insert(workoutPlans).values(record);
+    return NextResponse.json({ plan: planData, record, provider: generated.provider, model: generated.model });
   } catch (error) {
     const status = error instanceof Error && error.message === "UNAUTHORIZED" ? 401 : 500;
     return NextResponse.json({ error: status === 401 ? "Unauthorized" : error instanceof Error ? error.message : "Failed to generate workout plan" }, { status });

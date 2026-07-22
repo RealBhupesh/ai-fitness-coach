@@ -1,7 +1,7 @@
 import { desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { NextResponse } from "next/server";
-import { db } from "@/db";
+import { db, isDatabaseConfigured } from "@/db";
 import { foodLog } from "@/db/schema";
 import { requireServerSession } from "@/lib/auth/session";
 import { guardMutationRequest, getRequestIp } from "@/lib/security/request-guard";
@@ -10,6 +10,9 @@ import { foodLogInputSchema } from "@/lib/validation/schemas";
 export async function GET(request: Request) {
   try {
     const session = await requireServerSession(request);
+    if (!isDatabaseConfigured) {
+      return NextResponse.json({ entries: [] });
+    }
     const entries = await db.query.foodLog.findMany({
       where: eq(foodLog.userId, session.user.id),
       orderBy: [desc(foodLog.date)],
@@ -53,6 +56,9 @@ export async function POST(request: Request) {
       notes: parsed.data.notes,
       createdAt: new Date(),
     };
+    if (!isDatabaseConfigured) {
+      return NextResponse.json({ entry });
+    }
     await db.insert(foodLog).values(entry);
 
     return NextResponse.json({ entry });

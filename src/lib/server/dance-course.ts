@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { db } from "@/db";
+import { db, isDatabaseConfigured } from "@/db";
 import { danceCourseAttempts, danceCourseProgress, users, workoutSessions } from "@/db/schema";
 import { DEMO_COMMUNITY_LEADERBOARD } from "@/lib/demo-performance";
 import type { CommunityAthlete } from "@/lib/demo-performance";
@@ -62,6 +62,10 @@ export function buildDemoDanceCourseState(routine: DanceRoutinePack) {
 }
 
 async function getDanceLeaderboard(): Promise<CommunityAthlete[]> {
+  if (!isDatabaseConfigured) {
+    return DEMO_COMMUNITY_LEADERBOARD;
+  }
+
   const sessions = await db.query.workoutSessions.findMany({
     where: eq(workoutSessions.type, "dance"),
     orderBy: [desc(workoutSessions.date)],
@@ -104,7 +108,7 @@ async function getDanceLeaderboard(): Promise<CommunityAthlete[]> {
 }
 
 export async function getDanceCourseState(userId: string, routine: DanceRoutinePack, options: { demo?: boolean } = {}) {
-  if (options.demo) return buildDemoDanceCourseState(routine);
+  if (options.demo || !isDatabaseConfigured) return buildDemoDanceCourseState(routine);
 
   const [progressRows, attemptRows, leaderboard] = await Promise.all([
     db.query.danceCourseProgress.findMany({
@@ -127,6 +131,19 @@ export async function recordDanceCourseAttempt(userId: string, input: DanceCours
   const score = clampDanceScore(input.score);
   const reliability = clampDanceScore(input.reliability);
   const completed = isDanceAttemptComplete(score, reliability);
+
+  if (!isDatabaseConfigured) {
+    const attempts = 1;
+    const status = resolveDanceCourseStatus({ score, reliability, attempts });
+    return {
+      completed,
+      status,
+      bestScore: score,
+      bestReliability: reliability,
+      attempts,
+    };
+  }
+
   const existing = await db.query.danceCourseProgress.findFirst({
     where: and(
       eq(danceCourseProgress.userId, userId),

@@ -1,6 +1,6 @@
 import { desc, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { db } from "@/db";
+import { db, isDatabaseConfigured } from "@/db";
 import { coachMemories, exerciseReps, progressTracking, userProfiles, workoutSessions } from "@/db/schema";
 import { buildAchievementProgress, ensureAchievements } from "@/lib/server/app-data";
 import { parseJsonArray, parseJsonObject, toJson } from "@/lib/utils/json";
@@ -641,6 +641,15 @@ function weeklyReport(sessions: SessionLike[], decision: CoachDecision) {
 }
 
 async function loadAgentEvidence(userId: string) {
+  if (!isDatabaseConfigured) {
+    return {
+      sessions: [] as SessionLike[],
+      reps: [] as RepLike[],
+      profile: null,
+      recoveryCheckIn: null,
+    };
+  }
+
   const [sessions, profile, progress] = await Promise.all([
     db.query.workoutSessions.findMany({
       where: eq(workoutSessions.userId, userId),
@@ -729,26 +738,28 @@ export async function updateCoachMemory(userId: string): Promise<CoachAgentRepor
     preferredNextAction: decision.priority,
   };
 
-  const existing = await db.query.coachMemories.findFirst({ where: eq(coachMemories.userId, userId) });
-  const payload = {
-    weakMetrics: toJson(memory.weakMetrics),
-    strongMetrics: toJson(memory.strongMetrics),
-    recurringIssues: toJson(memory.recurringIssues),
-    recommendedFocus: memory.recommendedFocus,
-    preferredNextAction: memory.preferredNextAction,
-    lastDecision: toJson(decision),
-    weeklySummary: toJson(report),
-    updatedAt: new Date(),
-  };
-  if (existing) {
-    await db.update(coachMemories).set(payload).where(eq(coachMemories.id, existing.id));
-  } else {
-    await db.insert(coachMemories).values({
-      id: nanoid(),
-      userId,
-      ...payload,
-      createdAt: new Date(),
-    });
+  if (isDatabaseConfigured) {
+    const existing = await db.query.coachMemories.findFirst({ where: eq(coachMemories.userId, userId) });
+    const payload = {
+      weakMetrics: toJson(memory.weakMetrics),
+      strongMetrics: toJson(memory.strongMetrics),
+      recurringIssues: toJson(memory.recurringIssues),
+      recommendedFocus: memory.recommendedFocus,
+      preferredNextAction: memory.preferredNextAction,
+      lastDecision: toJson(decision),
+      weeklySummary: toJson(report),
+      updatedAt: new Date(),
+    };
+    if (existing) {
+      await db.update(coachMemories).set(payload).where(eq(coachMemories.id, existing.id));
+    } else {
+      await db.insert(coachMemories).values({
+        id: nanoid(),
+        userId,
+        ...payload,
+        createdAt: new Date(),
+      });
+    }
   }
 
   return {

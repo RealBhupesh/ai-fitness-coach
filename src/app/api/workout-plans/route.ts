@@ -1,7 +1,7 @@
 import { and, desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { NextResponse } from "next/server";
-import { db } from "@/db";
+import { db, isDatabaseConfigured } from "@/db";
 import { workoutPlans } from "@/db/schema";
 import { requireServerSession } from "@/lib/auth/session";
 import { DEMO_WORKOUT_PLAN_COOKIE_NAME, getDemoWorkoutPlanFromCookie, isDemoUser } from "@/lib/dummy-auth";
@@ -13,7 +13,7 @@ import { buildFallbackWorkoutPlan } from "@/lib/server/app-data";
 export async function GET(request: Request) {
   try {
     const session = await requireServerSession(request);
-    if (isDemoUser(session.user.id)) {
+    if (isDemoUser(session.user.id) || !isDatabaseConfigured) {
       const demoPlan = getDemoWorkoutPlanFromCookie<Record<string, unknown>>(request.headers.get("cookie") || "");
       return NextResponse.json({ plans: demoPlan ? [demoPlan] : [] });
     }
@@ -46,14 +46,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid plan payload", details: parsed.error.flatten() }, { status: 400 });
     }
 
-    const existingActive = await db.query.workoutPlans.findFirst({
-      where: and(eq(workoutPlans.userId, session.user.id), eq(workoutPlans.isActive, true)),
-    });
-
-    if (existingActive) {
-      await db.update(workoutPlans).set({ isActive: false }).where(eq(workoutPlans.id, existingActive.id));
-    }
-
     const fallback = buildFallbackWorkoutPlan(null);
     const record = {
       id: nanoid(),
@@ -80,6 +72,18 @@ export async function POST(request: Request) {
         sameSite: "lax",
       });
       return response;
+    }
+
+    if (!isDatabaseConfigured) {
+      return NextResponse.json({ plan: record });
+    }
+
+    const existingActive = await db.query.workoutPlans.findFirst({
+      where: and(eq(workoutPlans.userId, session.user.id), eq(workoutPlans.isActive, true)),
+    });
+
+    if (existingActive) {
+      await db.update(workoutPlans).set({ isActive: false }).where(eq(workoutPlans.id, existingActive.id));
     }
 
     await db.insert(workoutPlans).values(record);
