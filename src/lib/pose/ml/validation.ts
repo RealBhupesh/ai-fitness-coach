@@ -48,7 +48,7 @@ export function buildPostureValidationReport(examples: ValidationExample[]): Pos
     { minConfidence: 0.75, maxConfidence: 1 },
   ].map((bucket) => {
     const matching = examples.filter(
-      (example) => example.prediction.modelConfidence >= bucket.minConfidence && example.prediction.modelConfidence <= bucket.maxConfidence,
+      (example) => example.prediction.modelConfidence >= bucket.minConfidence && (example.prediction.modelConfidence < bucket.maxConfidence || bucket.maxConfidence === 1),
     );
     const bucketCorrect = matching.filter((example) => topClass(example.prediction) === example.expected).length;
     return {

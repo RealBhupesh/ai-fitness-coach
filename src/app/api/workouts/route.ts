@@ -1,3 +1,5 @@
+import { saveWorkoutSession } from "@/lib/server/workout-persistence";
+import { apiError, readJson, pagination } from "@/lib/server/api";
 import { desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { NextResponse } from "next/server";
@@ -22,21 +24,21 @@ export async function GET(request: Request) {
     const workouts = await db.query.workoutSessions.findMany({
       where: eq(workoutSessions.userId, session.user.id),
       orderBy: [desc(workoutSessions.date)],
-      limit: 100,
+      ...pagination(request),
     });
 
     return NextResponse.json({ workouts });
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return apiError(error, request);
   }
 }
 
 export async function POST(request: Request) {
   try {
     const session = await requireServerSession(request);
-    const guard = guardMutationRequest(request, {
+    const guard = await guardMutationRequest(request, {
       bucket: "workouts",
-      key: `${session.user.id}:${getRequestIp(request)}`,
+      key: session.user.id,
       limit: 20,
       windowMs: 60_000,
     });
@@ -44,131 +46,27 @@ export async function POST(request: Request) {
       return guard;
     }
 
-    const parsed = workoutSessionInputSchema.safeParse(await request.json());
+    const parsed = workoutSessionInputSchema.safeParse(await readJson(request));
     if (!parsed.success) {
       return NextResponse.json({ error: "Invalid workout payload", details: parsed.error.flatten() }, { status: 400 });
     }
 
     const data = parsed.data;
-    const sessionId = nanoid();
 
     if (isDemoUser(session.user.id) || !isDatabaseConfigured) {
-      return NextResponse.json({ message: "Workout recorded (demo mode)", sessionId });
+      return NextResponse.json({ message: "Workout recorded (demo mode)", sessionId: nanoid() });
     }
 
-    await db.insert(workoutSessions).values({
-      id: sessionId,
-      userId: session.user.id,
-      type: data.type,
-      exerciseType: data.exerciseType,
-      date: new Date(),
-      duration: data.duration,
-      caloriesBurned: data.caloriesBurned,
-      completed: true,
-      compositeScore: data.compositeScore,
-      scoringBreakdown: toJson(data.scoringBreakdown),
-      summary: data.summary,
-      totalReps: data.totalReps,
-      avgRepDurationMs:
-        data.repData.length > 0
-          ? Math.round(data.repData.reduce((sum, rep) => sum + rep.durationMs, 0) / data.repData.length)
-          : 0,
-      fatigueCurve: toJson(data.fatigueCurve),
-      frameQualityStats: data.sessionAnalysis ? toJson(data.sessionAnalysis.frameQualityStats) : null,
-      issueHistory: data.sessionAnalysis ? toJson(data.sessionAnalysis.issueHistory) : null,
-      phaseHistory: data.sessionAnalysis ? toJson(data.sessionAnalysis.phaseHistory) : null,
-      telemetry: data.sessionAnalysis ? toJson(data.sessionAnalysis.telemetry) : null,
-      postSetAnalysis: data.sessionAnalysis ? toJson(data.sessionAnalysis.postSet) : null,
-      createdAt: new Date(),
-    });
-
-    if (data.exercises.length) {
-      await db.insert(workoutExercises).values(
-        data.exercises.map((exercise, index) => ({
-          id: nanoid(),
-          sessionId,
-          exerciseId: exercise.exerciseId,
-          sets: exercise.sets,
-          reps: exercise.reps,
-          weight: exercise.weight,
-          duration: exercise.duration,
-          completed: true,
-          formScore: exercise.formScore,
-          romScore: exercise.romScore,
-          tempoScore: exercise.tempoScore,
-          safetyScore: exercise.safetyScore,
-          corrections: toJson(exercise.corrections),
-          order: index,
-        })),
-      );
-    }
-
-    if (data.repData.length) {
-      await db.insert(exerciseReps).values(
-        data.repData.map((rep) => ({
-          id: nanoid(),
-          sessionId,
-          exerciseId: rep.exerciseId,
-          repNumber: rep.repNumber,
-          phase: rep.phase,
-          formScore: rep.formScore,
-          romScore: rep.romScore,
-          tempoScore: rep.tempoScore,
-          safetyScore: rep.safetyScore,
-          corrections: toJson(rep.corrections),
-          durationMs: rep.durationMs,
-          timestamps: rep.timestamps ? toJson(rep.timestamps) : null,
-          curlScorecard: rep.curlScorecard ? toJson(rep.curlScorecard) : null,
-          squatScorecard: rep.squatScorecard ? toJson(rep.squatScorecard) : null,
-          createdAt: new Date(),
-        })),
-      );
-    }
-
-    if (data.feedbackEvents.length) {
-      await db.insert(sessionFeedbackEvents).values(
-        data.feedbackEvents.map((event) => ({
-          id: nanoid(),
-          sessionId,
-          timestamp: event.timestamp,
-          type: event.type,
-          message: event.message,
-          severity: event.severity,
-          source: event.source,
-          createdAt: new Date(),
-        })),
-      );
-    }
-
-    if (data.type === "dance" && data.danceSegments.length) {
-      const routine = await loadPrimaryDanceRoutinePack().catch(() => ({ id: "starter-groove-pack" }));
-      await Promise.all(
-        data.danceSegments.map((segment) =>
-          recordDanceCourseAttempt(session.user.id, {
-            routineId: routine.id,
-            segmentId: segment.id,
-            mode: "full_routine",
-            sourceSessionId: sessionId,
-            score: segment.overall,
-            reliability: segment.reliability,
-            timingScore: segment.timing,
-            transitionScore: segment.transition,
-            durationSeconds: data.duration * 60,
-            notes: segment.label,
-          }),
-        ),
-      );
-    }
-
+    const { sessionId: savedSessionId, replayed } = await saveWorkoutSession(session.user.id, data);
+    const sessionId = savedSessionId;
     const [achievementState, coachAgent] = await Promise.all([
-      ensureAchievements(session.user.id),
+      ensureAchievements(session.user.id).catch(() => ({ awards: [] })),
       updateCoachMemory(session.user.id).catch(() => null),
     ]);
     const unlockedCount = achievementState.awards.length;
 
-    return NextResponse.json({ message: "Workout created successfully", sessionId, achievementsUnlocked: unlockedCount, coachAgent });
+    return NextResponse.json({ message: "Workout created successfully", sessionId, achievementsUnlocked: unlockedCount, coachAgent, replayed });
   } catch (error) {
-    const status = error instanceof Error && error.message === "UNAUTHORIZED" ? 401 : 500;
-    return NextResponse.json({ error: status === 401 ? "Unauthorized" : "Failed to create workout" }, { status });
+    return apiError(error, request);
   }
 }

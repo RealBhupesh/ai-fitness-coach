@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "exercises": {
+    "squat": { "enabled": false, "path": null },
+    "bicep_curl": { "enabled": false, "path": null }
+  }
+}

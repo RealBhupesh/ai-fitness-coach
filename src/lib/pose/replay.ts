@@ -77,7 +77,7 @@ export function runReplayFixture(fixture: ReplayFixture): ReplayResult {
     trackerState = phaseUpdate.state;
 
     const analysis = analyzeExercise(fixture.exerciseId, trackingFrame, index, undefined, phaseUpdate.phase !== "idle" ? phaseUpdate.phase : undefined);
-    const safety = evaluateSafety(fixture.exerciseId, trackingFrame.smoothedLandmarks, fixture.injuries ?? []);
+    const safety = evaluateSafety(fixture.exerciseId, trackingFrame.analysisLandmarks ?? trackingFrame.smoothedLandmarks, fixture.injuries ?? []);
     finalAnalysis = {
       ...analysis,
       safety: Math.max(0, analysis.safety - (safety.severity === "critical" ? 35 : safety.severity === "warning" ? 12 : 0)),

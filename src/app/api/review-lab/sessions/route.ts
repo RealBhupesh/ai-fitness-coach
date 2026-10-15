@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/server/api";
 import { desc, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db, isDatabaseConfigured } from "@/db";
@@ -31,7 +32,7 @@ export async function GET(request: Request) {
     );
 
     return NextResponse.json({ sessions: reports });
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return apiError(error, request);
   }
 }

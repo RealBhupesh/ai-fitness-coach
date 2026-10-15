@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import * as THREE from "three";
+import { initThreeHUD, updateThreeHUD, draw, type ThreeHUDState } from "@/components/coach/pose-renderer";
 import Particles, { initParticlesEngine } from "@tsparticles/react";
 import { loadSlim } from "@tsparticles/slim";
 import { Brain, CheckCircle2, Clipboard, GripVertical, Maximize2, Mic, Minimize2, Monitor, RotateCcw, Smartphone, Target, Timer, Volume2, VolumeX, Waves, XCircle, Zap } from "lucide-react";
@@ -18,6 +18,10 @@ import type { DanceComparison, DanceRoutinePack, DanceTrainingFrameResult } from
 import { selectFeedbackCue } from "@/lib/feedback/cues";
 import { advanceFeedbackState, buildIssueSignature, createFeedbackState, type CoachLevel, type FeedbackCue } from "@/lib/feedback/state";
 import { createVoiceFeedbackController } from "@/lib/feedback/voice";
+import { useCameraRuntime } from "@/hooks/useCameraRuntime";
+import { usePostureModel } from "@/hooks/usePostureModel";
+import { useWorkoutPersistence } from "@/hooks/useWorkoutPersistence";
+import { SessionSaveStatus } from "@/components/coach/SessionSaveStatus";
 import { useUserProfile } from "@/hooks/useUserProfile";
 import { cn } from "@/lib/utils";
 import { evaluateConfidence } from "@/lib/pose/confidence";
@@ -396,493 +400,28 @@ function buildTeacherReport(evidence: CurlSessionEvidence | null, memory: CurlCo
     .join("\n");
 }
 
-interface ThreeHUDState {
-  scene: THREE.Scene;
-  camera: THREE.PerspectiveCamera;
-  renderer: THREE.WebGLRenderer;
-  jointMeshes: Map<number, THREE.Mesh>;
-  lineSegments: THREE.LineSegments;
-  gridHelper: THREE.GridHelper;
-  cage?: THREE.LineSegments;
-  sparkGroups?: Map<number, THREE.Group>;
-  initialized: boolean;
-}
-
-function initThreeHUD(canvas: HTMLCanvasElement): ThreeHUDState {
-  const width = canvas.clientWidth || 640;
-  const height = canvas.clientHeight || 360;
-  const aspect = width / height;
-
-  const scene = new THREE.Scene();
-
-  const camera = new THREE.PerspectiveCamera(40, aspect, 0.1, 100);
-  camera.position.set(0, 0.2, 7.8);
-  camera.lookAt(0, 0.2, -0.5);
-
-  const renderer = new THREE.WebGLRenderer({
-    canvas,
-    alpha: true,
-    antialias: true,
-    powerPreference: "high-performance",
-  });
-  renderer.setSize(width, height, false);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-
-  const gridHelper = new THREE.GridHelper(14, 28, 0x06b6d4, 0x1e293b);
-  gridHelper.position.y = -2.4;
-  gridHelper.position.z = -1;
-  gridHelper.rotation.x = Math.PI / 18;
-  scene.add(gridHelper);
-
-  // Futuristic Bounding cage wireframe cuboid enclosing the skeleton in 3D
-  const cageGeo = new THREE.BoxGeometry(4.8, 5.8, 3.8);
-  const cageEdges = new THREE.EdgesGeometry(cageGeo);
-  const cageMat = new THREE.LineBasicMaterial({
-    color: 0x0891b2,
-    transparent: true,
-    opacity: 0.35,
-  });
-  const cage = new THREE.LineSegments(cageEdges, cageMat);
-  cage.position.set(0, 0.2, -0.5);
-  scene.add(cage);
-
-  const ambient = new THREE.AmbientLight(0xffffff, 0.95);
-  scene.add(ambient);
-
-  const jointMeshes = new Map<number, THREE.Mesh>();
-  const jointsToRender = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
-  
-  const sphereGeo = new THREE.SphereGeometry(0.12, 16, 16);
-
-  jointsToRender.forEach((idx) => {
-    const mat = new THREE.MeshBasicMaterial({
-      color: 0x06b6d4,
-      transparent: true,
-      opacity: 0.95,
-    });
-    const mesh = new THREE.Mesh(sphereGeo, mat);
-    mesh.visible = false;
-    scene.add(mesh);
-    jointMeshes.set(idx, mesh);
-  });
-
-  // Small orbiting electron-like glowing sparkles surrounding active limbs
-  const sparkGroups = new Map<number, THREE.Group>();
-  const sparkJoints = [13, 14, 15, 16, 25, 26]; // elbows, wrists, knees
-  const sparkGeo = new THREE.SphereGeometry(0.035, 8, 8);
-  
-  sparkJoints.forEach((jointIdx) => {
-    const group = new THREE.Group();
-    scene.add(group);
-    sparkGroups.set(jointIdx, group);
-    
-    for (let i = 0; i < 4; i++) {
-      const sparkMat = new THREE.MeshBasicMaterial({
-        color: 0x22d3ee,
-        transparent: true,
-        opacity: 0.85,
-      });
-      const spark = new THREE.Mesh(sparkGeo, sparkMat);
-      
-      const angle = (i / 4) * Math.PI * 2;
-      const radius = 0.22 + Math.random() * 0.08;
-      spark.position.set(Math.cos(angle) * radius, Math.sin(angle) * radius, (Math.random() - 0.5) * 0.1);
-      group.add(spark);
-    }
-  });
-
-  const boneMaterial = new THREE.LineBasicMaterial({
-    color: 0x0891b2,
-    transparent: true,
-    opacity: 0.8,
-  });
-
-  const lineGeo = new THREE.BufferGeometry();
-  const linePositions = new Float32Array(POSE_CONNECTIONS.length * 6);
-  lineGeo.setAttribute("position", new THREE.BufferAttribute(linePositions, 3));
-  
-  const lineSegments = new THREE.LineSegments(lineGeo, boneMaterial);
-  scene.add(lineSegments);
-
-  return {
-    scene,
-    camera,
-    renderer,
-    jointMeshes,
-    lineSegments,
-    gridHelper,
-    cage,
-    sparkGroups,
-    initialized: true,
-  };
-}
-
-function updateThreeHUD(
-  threeState: ThreeHUDState | null,
-  landmarks: Landmark[] | null,
-  score: number,
-  streakCount: number,
-  mirror: boolean,
-  exerciseId: ExerciseId,
-  analysis?: FrameAnalysis
-) {
-  if (!threeState?.initialized || !landmarks?.length) return;
-
-  const { scene, camera, renderer, jointMeshes, lineSegments, gridHelper, cage, sparkGroups } = threeState;
-
-  const perfColor = score >= 88 ? 0x10b981 : score >= 72 ? 0xf59e0b : score >= 55 ? 0xf97316 : 0xf43f5e;
-  const activeColor = streakCount >= 5 ? 0xd946ef : streakCount >= 3 ? 0x06b6d4 : perfColor;
-
-  if (gridHelper && gridHelper.material) {
-    (gridHelper.material as THREE.LineBasicMaterial).color.setHex(activeColor);
-  }
-
-  if (cage && cage.material) {
-    (cage.material as THREE.LineBasicMaterial).color.setHex(activeColor);
-  }
-
-  const scaleX = 7.2;
-  const scaleY = 7.2;
-  const scaleZ = 5.0;
-
-  jointMeshes.forEach((mesh, idx) => {
-    const pt = landmarks[idx];
-    if (pt && (pt.visibility ?? 0) > 0.4) {
-      mesh.visible = true;
-      const adjustedX = mirror ? (1.5 - pt.x - 1.0) : (pt.x - 0.5);
-      mesh.position.x = adjustedX * scaleX;
-      mesh.position.y = (0.5 - pt.y) * scaleY;
-      mesh.position.z = -(pt.z ?? 0) * scaleZ;
-
-      (mesh.material as THREE.MeshBasicMaterial).color.setHex(activeColor);
-    } else {
-      mesh.visible = false;
-    }
-  });
-
-  if (sparkGroups) {
-    sparkGroups.forEach((group, jointIdx) => {
-      const parentMesh = jointMeshes.get(jointIdx);
-      if (parentMesh && parentMesh.visible) {
-        group.visible = true;
-        group.position.copy(parentMesh.position);
-        
-        group.rotation.x += 0.025;
-        group.rotation.y += 0.035;
-
-        group.children.forEach((child) => {
-          if (child instanceof THREE.Mesh && child.material) {
-            (child.material as THREE.MeshBasicMaterial).color.setHex(activeColor);
-          }
-        });
-      } else {
-        group.visible = false;
-      }
-    });
-  }
-
-  const posArr = lineSegments.geometry.attributes.position.array as Float32Array;
-  let arrIdx = 0;
-
-  for (const [a, b] of POSE_CONNECTIONS) {
-    const startMesh = jointMeshes.get(a);
-    const endMesh = jointMeshes.get(b);
-
-    if (startMesh?.visible && endMesh?.visible) {
-      posArr[arrIdx++] = startMesh.position.x;
-      posArr[arrIdx++] = startMesh.position.y;
-      posArr[arrIdx++] = startMesh.position.z;
-
-      posArr[arrIdx++] = endMesh.position.x;
-      posArr[arrIdx++] = endMesh.position.y;
-      posArr[arrIdx++] = endMesh.position.z;
-    } else {
-      posArr[arrIdx++] = 0; posArr[arrIdx++] = 0; posArr[arrIdx++] = 0;
-      posArr[arrIdx++] = 0; posArr[arrIdx++] = 0; posArr[arrIdx++] = 0;
-    }
-  }
-
-  lineSegments.geometry.attributes.position.needsUpdate = true;
-  (lineSegments.material as THREE.LineBasicMaterial).color.setHex(activeColor);
-
-  // Dynamic Camera Orbit Sway: Orbit left and right by +/- 25 degrees, and sway pitch!
-  // This produces a fully visible, beautiful 3D depth parallax where the floor grid, 
-  // coordinates cage, and skeleton rotate clearly inside the camera box.
-  const time = Date.now() * 0.0006;
-  const radius = 7.8;
-  const angleRad = Math.sin(time * 0.8) * 0.45; // Orbit left and right
-  camera.position.x = Math.sin(angleRad) * radius;
-  camera.position.z = Math.cos(angleRad) * radius;
-  camera.position.y = Math.cos(time * 0.4) * 0.35 + 0.2; // Pitch sway
-  camera.lookAt(0, 0.2, -0.5);
-
-  renderer.render(scene, camera);
-}
-
-function draw(
-  canvas: HTMLCanvasElement | null,
-  video: HTMLVideoElement | null,
-  landmarks: Landmark[] | null,
-  score: number,
-  mirror: boolean,
-  exerciseId?: ExerciseId,
-  analysis?: FrameAnalysis,
-  skipSkeleton2D = false
-) {
-  if (!canvas) return;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-  if (video) {
-    canvas.width = video.videoWidth || 1280;
-    canvas.height = video.videoHeight || 720;
-  } else {
-    canvas.width = canvas.width || 640;
-    canvas.height = canvas.height || 360;
-  }
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  if (!landmarks?.length) return;
-
-  const defaultColor = score >= 88 ? "#10b981" : score >= 72 ? "#f59e0b" : score >= 55 ? "#f97316" : "#f43f5e";
-
-  ctx.save();
-  if (mirror) {
-    ctx.translate(canvas.width, 0);
-    ctx.scale(-1, 1);
-  }
-
-  // Draw target guideline HUD overlays
-  if (exerciseId === "squat" && analysis) {
-    const leftKnee = landmarks[25];
-    const rightKnee = landmarks[26];
-    if (leftKnee && rightKnee && (leftKnee.visibility ?? 0) > 0.5 && (rightKnee.visibility ?? 0) > 0.5) {
-      const avgKneeY = ((leftKnee.y + rightKnee.y) / 2) * canvas.height;
-      ctx.strokeStyle = "rgba(16, 185, 129, 0.25)";
-      ctx.lineWidth = 2;
-      ctx.setLineDash([5, 5]);
-      ctx.beginPath();
-      ctx.moveTo(0, avgKneeY);
-      ctx.lineTo(canvas.width, avgKneeY);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      
-      ctx.fillStyle = "rgba(16, 185, 129, 0.45)";
-      ctx.font = "bold 9px Inter, sans-serif";
-      ctx.textAlign = "left";
-      ctx.fillText("TARGET DEPTH", 15, avgKneeY - 4);
-    }
-  }
-
-  if (!skipSkeleton2D) {
-    // Draw HUD lines (bones) with localized color highlights based on joint metrics!
-    ctx.lineWidth = 4.5;
-  for (const [a, b] of POSE_CONNECTIONS) {
-    const start = landmarks[a];
-    const end = landmarks[b];
-    if (!start || !end || (start.visibility ?? 0) < 0.4 || (end.visibility ?? 0) < 0.4) continue;
-
-    let stroke = defaultColor;
-    if (analysis && analysis.metrics.length) {
-      if (exerciseId === "bicep_curl") {
-        const isArm = (a === 11 && b === 13) || (a === 13 && b === 15) || (a === 12 && b === 14) || (a === 14 && b === 16);
-        if (isArm) {
-          const elbowPath = analysis.metrics.find((m) => m.name.includes("Elbow"))?.score ?? 100;
-          const wristStack = analysis.metrics.find((m) => m.name.includes("Wrist"))?.score ?? 100;
-          const minArmScore = Math.min(elbowPath, wristStack);
-          stroke = minArmScore >= 85 ? "#10b981" : minArmScore >= 70 ? "#f59e0b" : "#f43f5e";
-        }
-        const isTorso = (a === 11 && b === 23) || (a === 12 && b === 24) || (a === 11 && b === 12);
-        if (isTorso) {
-          const torsoStab = analysis.metrics.find((m) => m.name.includes("Torso"))?.score ?? 100;
-          stroke = torsoStab >= 85 ? "#10b981" : torsoStab >= 70 ? "#f59e0b" : "#f43f5e";
-        }
-      } else if (exerciseId === "squat") {
-        const isLeg = (a === 23 && b === 25) || (a === 25 && b === 27) || (a === 24 && b === 26) || (a === 26 && b === 28);
-        if (isLeg) {
-          const depth = analysis.metrics.find((m) => m.name.includes("Depth"))?.score ?? 100;
-          const kneeTrack = analysis.metrics.find((m) => m.name.includes("Knee"))?.score ?? 100;
-          const minLegScore = Math.min(depth, kneeTrack);
-          stroke = minLegScore >= 85 ? "#10b981" : minLegScore >= 70 ? "#f59e0b" : "#f43f5e";
-        }
-        const isTorso = (a === 11 && b === 23) || (a === 12 && b === 24) || (a === 11 && b === 12) || (a === 23 && b === 24);
-        if (isTorso) {
-          const torsoStack = analysis.metrics.find((m) => m.name.includes("Torso"))?.score ?? 100;
-          stroke = torsoStack >= 85 ? "#10b981" : torsoStack >= 70 ? "#f59e0b" : "#f43f5e";
-        }
-      } else if (exerciseId === "pushup" || exerciseId === "plank") {
-        const isBody = (a === 11 && b === 23) || (a === 23 && b === 25) || (a === 25 && b === 27) || (a === 12 && b === 24) || (a === 24 && b === 26) || (a === 26 && b === 28);
-        if (isBody) {
-          const bodyLine = analysis.metrics.find((m) => m.name.includes("Body"))?.score ?? 100;
-          stroke = bodyLine >= 85 ? "#10b981" : bodyLine >= 70 ? "#f59e0b" : "#f43f5e";
-        }
-        const isArm = (a === 11 && b === 13) || (a === 13 && b === 15) || (a === 12 && b === 14) || (a === 14 && b === 16);
-        if (isArm) {
-          const depth = analysis.metrics.find((m) => m.name.includes("Depth"))?.score ?? 100;
-          stroke = depth >= 85 ? "#10b981" : depth >= 70 ? "#f59e0b" : "#f43f5e";
-        }
-      } else if (exerciseId === "lunge") {
-        const isLeg = (a === 23 && b === 25) || (a === 25 && b === 27) || (a === 24 && b === 26) || (a === 26 && b === 28);
-        if (isLeg) {
-          const frontKnee = analysis.metrics.find((m) => m.name.includes("Front"))?.score ?? 100;
-          stroke = frontKnee >= 85 ? "#10b981" : frontKnee >= 70 ? "#f59e0b" : "#f43f5e";
-        }
-        const isTorso = (a === 11 && b === 23) || (a === 12 && b === 24) || (a === 11 && b === 12);
-        if (isTorso) {
-          const torso = analysis.metrics.find((m) => m.name.includes("Torso"))?.score ?? 100;
-          stroke = torso >= 85 ? "#10b981" : torso >= 70 ? "#f59e0b" : "#f43f5e";
-        }
-      }
-    }
-
-    ctx.strokeStyle = stroke;
-    ctx.beginPath();
-    ctx.moveTo(start.x * canvas.width, start.y * canvas.height);
-    ctx.lineTo(end.x * canvas.width, end.y * canvas.height);
-    ctx.stroke();
-  }
-
-  // Draw joints (dots) with halo glow if warning/critical
-  for (const [idx, point] of landmarks.entries()) {
-    if (!point || (point.visibility ?? 0) < 0.35) continue;
-    ctx.beginPath();
-    ctx.arc(point.x * canvas.width, point.y * canvas.height, 6, 0, Math.PI * 2);
-    ctx.fillStyle = defaultColor;
-    ctx.fill();
-
-    if (analysis && (idx === 13 || idx === 14 || idx === 25 || idx === 26)) {
-      const isElbow = idx === 13 || idx === 14;
-      const isKnee = idx === 25 || idx === 26;
-
-      if (isElbow && exerciseId === "bicep_curl") {
-        const elbowPath = analysis.metrics.find((m) => m.name.includes("Elbow"))?.score ?? 100;
-        if (elbowPath < 70) {
-          ctx.strokeStyle = "rgba(244, 63, 94, 0.45)";
-          ctx.lineWidth = 2;
-          ctx.setLineDash([3, 3]);
-          ctx.beginPath();
-          ctx.arc(point.x * canvas.width, point.y * canvas.height, 16, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.setLineDash([]);
-        }
-      }
-
-      if (isKnee && exerciseId === "squat") {
-        const kneeTrack = analysis.metrics.find((m) => m.name.includes("Knee"))?.score ?? 100;
-        if (kneeTrack < 70) {
-          ctx.strokeStyle = "rgba(244, 63, 94, 0.5)";
-          ctx.lineWidth = 2.5;
-          ctx.beginPath();
-          ctx.arc(point.x * canvas.width, point.y * canvas.height, 16, 0, Math.PI * 2);
-          ctx.stroke();
-        }
-      }
-    }
-  }
-  }
-
-  // Helper to draw clean angle readouts on canvas
-  function drawAngleHUD(aIdx: number, bIdx: number, cIdx: number, label: string) {
-    if (!landmarks) return;
-    const a = landmarks[aIdx];
-    const b = landmarks[bIdx];
-    const c = landmarks[cIdx];
-    if (a && b && c && (a.visibility ?? 0) > 0.45 && (b.visibility ?? 0) > 0.5 && (c.visibility ?? 0) > 0.45) {
-      const ang = angle(a, b, c);
-      const bx = b.x * (canvas?.width ?? 1280);
-      const by = b.y * (canvas?.height ?? 720);
-
-      if (ctx) {
-        ctx.fillStyle = "rgba(9, 9, 11, 0.72)";
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
-        ctx.lineWidth = 1;
-        
-        const boxW = 54;
-        const boxH = 30;
-        ctx.beginPath();
-        ctx.roundRect(bx - boxW / 2, by - 38, boxW, boxH, 6);
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.fillStyle = "#38bdf8";
-        ctx.font = "bold 10px Inter, sans-serif";
-        ctx.textAlign = "center";
-        ctx.fillText(`${Math.round(ang)}°`, bx, by - 24);
-
-        ctx.fillStyle = "#a1a1aa";
-        ctx.font = "bold 7px Inter, sans-serif";
-        ctx.fillText(label, bx, by - 12);
-      }
-    }
-  }
-
-  if (exerciseId === "bicep_curl") {
-    drawAngleHUD(11, 13, 15, "L ELBOW");
-    drawAngleHUD(12, 14, 16, "R ELBOW");
-  } else if (exerciseId === "squat") {
-    drawAngleHUD(23, 25, 27, "L KNEE");
-    drawAngleHUD(24, 26, 28, "R KNEE");
-  } else if (exerciseId === "pushup" || exerciseId === "plank") {
-    drawAngleHUD(11, 13, 15, "L ELBOW");
-    drawAngleHUD(12, 14, 16, "R ELBOW");
-  } else if (exerciseId === "lunge") {
-    drawAngleHUD(23, 25, 27, "L KNEE");
-    drawAngleHUD(24, 26, 28, "R KNEE");
-  }
-
-  ctx.restore();
-
-  if (analysis && (analysis.injuryRisks.length || analysis.corrections.length)) {
-    const textStr = (analysis.injuryRisks[0] || analysis.corrections[0]).toUpperCase();
-    const isCritical = analysis.injuryRisks.length > 0;
-
-    ctx.save();
-    ctx.font = "bold 13px Inter, sans-serif";
-    ctx.textAlign = "center";
-    
-    const bannerH = 34;
-    const textWidth = ctx.measureText(textStr).width;
-    const bannerW = Math.max(260, textWidth + 36);
-    const bannerX = canvas.width / 2;
-    const bannerY = canvas.height - 45;
-
-    ctx.fillStyle = isCritical ? "rgba(244, 63, 94, 0.92)" : "rgba(245, 158, 11, 0.92)";
-    ctx.shadowColor = isCritical ? "rgba(244, 63, 94, 0.45)" : "rgba(245, 158, 11, 0.45)";
-    ctx.shadowBlur = 15;
-    ctx.beginPath();
-    ctx.roundRect(bannerX - bannerW / 2, bannerY - bannerH / 2, bannerW, bannerH, 8);
-    ctx.fill();
-
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = "#ffffff";
-    ctx.fillText(textStr, bannerX, bannerY + 4);
-    ctx.restore();
-  } else if (analysis && score >= 88) {
-    ctx.save();
-    ctx.font = "bold 11px Inter, sans-serif";
-    ctx.textAlign = "center";
-    const bannerX = canvas.width / 2;
-    const bannerY = canvas.height - 40;
-    
-    ctx.fillStyle = "rgba(16, 185, 129, 0.85)";
-    ctx.beginPath();
-    ctx.roundRect(bannerX - 70, bannerY - 14, 140, 24, 6);
-    ctx.fill();
-    
-    ctx.fillStyle = "#ffffff";
-    ctx.fillText("FORM EXCELLENT", bannerX, bannerY + 2);
-    ctx.restore();
-  }
-}
-
 export default function PoseAnalyzer({ mode = "workout" }: Props) {
-  const { profile } = useUserProfile();
+  const { profile, loading: profileLoading, error: profileError } = useUserProfile();
+  const persistence = useWorkoutPersistence(profile?.userId);
+  const curlMemoryKey = profile?.userId ? `${CURL_MEMORY_KEY}:${profile.userId}` : null;
+  const clientSessionIdRef = useRef<string | null>(null);
+  const [cameraFacing, setCameraFacing] = useState<"user" | "environment">("user");
   const exercises = useMemo(() => POSE_EXERCISES.filter((item) => IDS[mode].includes(item.id)), [mode]);
   const [exerciseId, setExerciseId] = useState<ExerciseId>(mode === "dance" ? "dance_basic" : "squat");
   const exercise = useMemo(() => exercises.find((item) => item.id === exerciseId) ?? exercises[0], [exerciseId, exercises]);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const overlayRef = useRef<HTMLCanvasElement | null>(null);
-  const cameraControllerRef = useRef<ReturnType<typeof createCameraController> | null>(null);
-  const trackingEngineRef = useRef<ReturnType<typeof createPoseTrackingEngine> | null>(null);
+  const cameraRuntime = useCameraRuntime({
+    videoRef, exerciseId: () => exerciseIdRef.current,
+    onFrame: (frame, fps) => { setFps(Math.round(fps)); handleTrackingFrame(frame); },
+    onBeforeLeave: () => { if (runningRef.current) void stopSession(); },
+    onDisconnect: () => { setCameraOn(false); handleTrackingFrame(null); },
+    onReset: () => { phaseTrackerRef.current = createPhaseTrackerState(); handleTrackingFrame(null); },
+    onError: error => { setCameraOn(false); toast.error(error.message); showStatus(error.message, "warning"); },
+    onTelemetry: event => pushTelemetry(event), onProfile: label => setCameraProfileLabel(label),
+  });
+  const { controllerRef: cameraControllerRef, engineRef: trackingEngineRef } = cameraRuntime;
   const trackingFrameRef = useRef<TrackingFrame | null>(null);
   const runningRef = useRef(false);
   const mirrorRef = useRef(true);
@@ -938,6 +477,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   const [danceComparison, setDanceComparison] = useState<DanceComparison | null>(null);
   const [danceTraining, setDanceTraining] = useState<DanceTrainingFrameResult | null>(null);
   const [danceSegmentBreakdown, setDanceSegmentBreakdown] = useState<Array<{ id: string; label: string; overall: number; timing: number; transition: number }>>([]);
+  const postureModel = usePostureModel(exerciseId);
   const [mlPrediction, setMlPrediction] = useState<PostureMlPrediction | null>(null);
   const [topMistakes, setTopMistakes] = useState<TopMistake[]>([]);
   const [correctivePlan, setCorrectivePlan] = useState<CorrectiveBlock[]>([]);
@@ -968,7 +508,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   const [streakCount, setStreakCount] = useState(0);
   const [replayFrameIndex, setReplayFrameIndex] = useState(0);
   const replayOverlayRef = useRef<HTMLCanvasElement | null>(null);
-  const landmarksHistoryRef = useRef<Array<{ landmarks: Landmark[], analysis: FrameAnalysis }>>([]);
+  const landmarksHistoryRef = useRef<Array<{ timestampMs: number; landmarks: Landmark[]; analysisLandmarks?: Landmark[]; analysis: FrameAnalysis }>>([]);
 
   const [hudMode, setHudMode] = useState<"2d" | "3d">("2d");
   const threeCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1314,7 +854,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   };
 
   const maybeCoach = async (frame: FrameAnalysis, cue: FeedbackCue, triggerReason: CoachTriggerReason | null) => {
-    if ((!runningRef.current && triggerReason !== "manual") || !triggerReason) return;
+    if (triggerReason !== "manual") return;
     const now = Date.now();
     const curlInterval = coachLevelRef.current === "easy" ? 14_000 : coachLevelRef.current === "hard" ? 6_000 : 8_000;
     const interval = exerciseIdRef.current === "bicep_curl" ? curlInterval : exerciseIdRef.current === "squat" ? 8_500 : exerciseIdRef.current === "dance_basic" ? 7_500 : 12_000;
@@ -1396,9 +936,17 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   const handleTrackingFrame = (trackingFrame: TrackingFrame | null) => {
     const currentId = exerciseIdRef.current;
     const currentExercise = exerciseRef.current;
+    const learned = trackingFrame ? postureModel.predict({ timestampMs: trackingFrame.timestampMs, landmarks: trackingFrame.analysisLandmarks ?? trackingFrame.smoothedLandmarks }) : null;
     runDrawLoop(trackingFrame?.smoothedLandmarks ?? null, analysisRef.current.overall, currentId, analysisRef.current);
 
     if (!trackingFrame?.smoothedLandmarks?.length) {
+      trackingFrameRef.current = null;
+      curlFrameHistoryRef.current = [];
+      squatFrameHistoryRef.current = [];
+      calibrationHoldFramesRef.current = 0;
+      phaseTrackerRef.current = createPhaseTrackerState();
+      postureModel.reset();
+
       const lost = { ...EMPTY_CONFIDENCE(currentId), message: "Camera lost. Step back into frame.", reasons: ["Camera lost. Step back into frame."] };
       setConfidence(lost);
       confidenceRef.current = lost;
@@ -1423,6 +971,13 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       return;
     }
 
+    const previousTimestamp = trackingFrameRef.current?.timestampMs;
+    if (previousTimestamp !== undefined && (trackingFrame.timestampMs <= previousTimestamp || trackingFrame.timestampMs - previousTimestamp > 1000)) {
+      phaseTrackerRef.current = createPhaseTrackerState();
+      curlFrameHistoryRef.current = [];
+      squatFrameHistoryRef.current = [];
+      postureModel.reset();
+    }
     trackingFrameRef.current = trackingFrame;
     setFps(Math.round(trackingFrame.fps));
     const gate = evaluateConfidence(trackingFrame, currentId);
@@ -1430,10 +985,8 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     confidenceRef.current = gate;
 
     if (!runningRef.current) {
-      const isFastStart = isFastStartExercise(currentId);
       const requiredHoldFrames = calibrationFramesForExercise(currentId);
-      const fastUsableFrame = isFastStart && gate.avgVisibility >= 0.34 && gate.frameQuality !== "camera_lost";
-      const canAdvanceCalibration = gate.ready || fastUsableFrame;
+      const canAdvanceCalibration = gate.ready;
       const nextHoldProgress = canAdvanceCalibration ? Math.min(calibrationHoldFramesRef.current + 1, requiredHoldFrames) : 0;
       calibrationHoldFramesRef.current = nextHoldProgress;
       setCalibrationHoldProgress(nextHoldProgress);
@@ -1459,13 +1012,12 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     }
 
     const isFastStart = isFastStartExercise(currentId);
-    const shouldPauseScoring = isFastStart
-      ? gate.frameQuality === "camera_lost" || gate.avgVisibility < 0.32
-      : gate.pauseTracking || !gate.ready || gate.avgVisibility < 0.55;
-    const shouldPauseRepTracking = gate.frameQuality === "camera_lost" || gate.avgVisibility < (isFastStart ? 0.28 : 0.4);
+    const shouldPauseScoring = gate.pauseTracking || !gate.ready || gate.avgVisibility < 0.55;
+    const shouldPauseRepTracking = shouldPauseScoring;
     const pauseReason = shouldPauseScoring ? `${gate.message} Rep counting is paused until tracking recovers.` : null;
     setTrackingPausedReason(pauseReason);
     if (shouldPauseScoring) {
+      phaseTrackerRef.current = createPhaseTrackerState();
       setCalibrationHoldProgress(0);
       calibrationHoldFramesRef.current = 0;
       if (lastPauseReasonRef.current !== pauseReason) {
@@ -1488,7 +1040,8 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
         lastPauseReasonRef.current = pauseReason;
       }
       feedbackStateRef.current = createFeedbackState();
-      if (gate.avgVisibility < 0.35) return;
+      postureModel.reset();
+      return;
     } else {
       lastPauseReasonRef.current = null;
     }
@@ -1503,7 +1056,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     phaseTrackerRef.current = phaseUpdate.state;
 
     const frame = analyzeExercise(currentId, trackingFrame, activeDanceCheckpoint?.index ?? Math.floor(elapsedMs / 4000), activeDanceCheckpoint?.step.cue, phaseUpdate.phase !== "idle" ? phaseUpdate.phase : undefined);
-    const safety = evaluateSafety(currentId, trackingFrame.smoothedLandmarks, [...(profileRef.current?.injuries ?? []), ...(profileRef.current?.painPoints ?? [])]);
+    const safety = evaluateSafety(currentId, trackingFrame.analysisLandmarks ?? trackingFrame.smoothedLandmarks, [...(profileRef.current?.injuries ?? []), ...(profileRef.current?.painPoints ?? [])]);
     const resolved: FrameAnalysis = {
       ...frame,
       safety: Math.max(0, frame.safety - (safety.severity === "critical" ? 35 : safety.severity === "warning" ? 12 : 0)),
@@ -1514,13 +1067,15 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
 
     framesRef.current.push(resolved);
     landmarksHistoryRef.current.push({
-      landmarks: trackingFrame.smoothedLandmarks,
+      timestampMs: now, landmarks: trackingFrame.smoothedLandmarks, analysisLandmarks: trackingFrame.analysisLandmarks ?? trackingFrame.smoothedLandmarks,
       analysis: resolved
     });
+    // Keep at most one minute of local replay frames on memory-limited devices.
+    if (landmarksHistoryRef.current.length > 1800) landmarksHistoryRef.current.shift();
     if (currentId === "squat" || currentId === "bicep_curl") {
-      const landmarkWindow = landmarksHistoryRef.current.slice(-18).map((point) => point.landmarks);
+      const landmarkWindow = landmarksHistoryRef.current.filter(point => now - point.timestampMs <= 1000).map(point => point.analysisLandmarks ?? point.landmarks);
       setMlPrediction(
-        evaluatePostureMl({
+        learned ?? evaluatePostureMl({
           exerciseId: currentId,
           phase: phaseUpdate.phase,
           landmarkWindow,
@@ -1537,7 +1092,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       squatFrameHistoryRef.current = [...squatFrameHistoryRef.current.slice(-180), { timestampMs: now, analysis: resolved }];
     }
     if (framesRef.current.length % 15 === 0) curveRef.current.push(resolved.overall);
-    recordFrame(sessionBufferRef.current, trackingFrame, resolved);
+    recordFrame(sessionBufferRef.current, trackingFrame, resolved, Math.max(0, now - startedAtRef.current));
     if (!shouldPauseRepTracking) maybeRep(phaseUpdate, previousPhaseState, resolved, now);
     setAnalysis(resolved);
     analysisRef.current = resolved;
@@ -1574,7 +1129,11 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     caloriesRef.current = estimatedCalories;
     runDrawLoop(trackingFrame.smoothedLandmarks, resolved.overall, currentId, resolved);
 
-    const liveCue = selectFeedbackCue(currentId, resolved, safety, trackingFrame.trackingConfidence, { coachLevel: coachLevelRef.current });
+    let liveCue = selectFeedbackCue(currentId, resolved, safety, trackingFrame.trackingConfidence, { coachLevel: coachLevelRef.current });
+    if (learned?.evaluationStatus === "validated" && !learned.suppressed && learned.observedFaults?.length && liveCue.severity !== "critical") {
+      const fault = learned.observedFaults[0];
+      liveCue = { message: `Check ${ML_MISTAKE_LABELS[fault].toLowerCase()} on your next controlled rep.`, severity: "warning", source: "rule_engine", signature: `learned:${learned.modelVersion}:${fault}`, secondaryNote: "Learned observation from visible movement evidence." };
+    }
     const cueDecision = advanceFeedbackState(feedbackStateRef.current, shouldPauseScoring ? null : liveCue, {
       now,
       confidence: trackingFrame.trackingConfidence,
@@ -1602,38 +1161,11 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     try {
       const video = videoRef.current;
       if (!video) return;
-      if (!cameraControllerRef.current) {
-        cameraControllerRef.current = createCameraController({
-          video,
-          preset: "desktop_hq",
-          onFrame: async (frame) => {
-            try {
-              const tracked = await trackingEngineRef.current?.processFrame(frame, exerciseIdRef.current);
-              setFps(Math.round(frame.fps));
-              handleTrackingFrame(tracked ?? null);
-            } catch (error) {
-              const message = error instanceof Error ? error.message : "Pose engine failed to start.";
-              pushTelemetry({ timestampMs: 0, type: "camera_start_failure", message });
-              showStatus(message, "warning", "system", "Camera may still be available, but pose analysis cannot start until the model loads.");
-              toast.error(message);
-              cameraControllerRef.current?.stop();
-              setCameraOn(false);
-            }
-          },
-          onDisconnect: () => {
-            setCameraOn(false);
-            handleTrackingFrame(null);
-          },
-        });
-      }
-      if (!trackingEngineRef.current) trackingEngineRef.current = createPoseTrackingEngine({ onTelemetry: pushTelemetry });
-      const cameraInfo = await cameraControllerRef.current.start("desktop_hq");
+      const cameraInfo = await cameraRuntime.start();
       setCameraProfileLabel(cameraInfo.profile.label);
       setCameraOn(true);
       showStatus(
-        isFastStartExercise(exerciseIdRef.current)
-          ? `${cameraInfo.profile.label} active. Fast start is available now.`
-          : `${cameraInfo.profile.label} active. Finish calibration before starting the session.`,
+        `${cameraInfo.profile.label} active. Finish calibration before starting the session.`,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to access camera";
@@ -1647,8 +1179,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
 
   const stopCamera = (options: { preserveResults?: boolean } = {}) => {
     try {
-      cameraControllerRef.current?.stop();
-      void trackingEngineRef.current?.stop();
+      cameraRuntime.stop();
     } catch {}
     trackingFrameRef.current = null;
     runningRef.current = false;
@@ -1679,23 +1210,19 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
   };
 
   const startSession = () => {
+    if (profileLoading || profileError || !profile?.userId) { toast.error("Wait for your saved profile to load before starting."); return; }
     if (!cameraOn) return;
     const isFastStart = isFastStartExercise(exerciseIdRef.current);
     const requiredHoldFrames = calibrationFramesForExercise(exerciseIdRef.current);
-    if (!isFastStart && (!confidence.ready || calibrationHoldFramesRef.current < requiredHoldFrames)) {
+    if (!confidence.ready || calibrationHoldFramesRef.current < requiredHoldFrames) {
       const message = confidence.ready ? "Hold steady in the ready position for one more moment before starting." : confidence.message;
       pushTelemetry({ timestampMs: 0, type: "calibration_blocked", message, meta: { frameQuality: confidence.frameQuality, view: confidence.view } });
       toast.error(message);
       return;
     }
-    if (exerciseIdRef.current === "dance_basic" && !confidence.ready) {
-      pushTelemetry({ timestampMs: 0, type: "calibration_ready", message: "Fast dance start enabled. Timing and reliability will improve as tracking settles.", meta: { exerciseId: "dance_basic", fastStart: true } });
-      toast.warning("Fast dance start enabled. Keep your full body visible for better timing scores.");
-    }
     if (exerciseIdRef.current === "bicep_curl" && !curlBaselineRef.current?.ready) {
-      const message = curlBaselineRef.current?.message ?? "Fast curl start enabled. Baseline will keep improving during the first reps.";
-      pushTelemetry({ timestampMs: 0, type: "calibration_ready", message, meta: { exerciseId: "bicep_curl", coachingLevel: coachLevelRef.current, fastStart: true } });
-      toast.warning("Fast curl start enabled. The coach will refine calibration during your first reps.");
+      toast.error("Finish calibration with shoulders, elbows, wrists, and hips visible before starting.");
+      return;
     }
     const sessionCurlBaseline = curlBaselineRef.current;
     reset();
@@ -1705,6 +1232,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     }
     const now = Date.now();
     startedAtRef.current = now;
+    clientSessionIdRef.current = crypto.randomUUID();
     phaseTrackerRef.current = trackingFrameRef.current?.smoothedLandmarks?.length
       ? advancePhaseTracker(exerciseIdRef.current, trackingFrameRef.current, createPhaseTrackerState(now), now).state
       : createPhaseTrackerState(now);
@@ -1739,10 +1267,9 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
             reliability: Math.round(average(value.reliability)),
           }))
         : [];
-      const response = await fetch("/api/workouts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const data = await persistence.save({
+          clientSessionId: clientSessionIdRef.current ?? (clientSessionIdRef.current = crypto.randomUUID()),
+          modelEvidence: { artifactVersion: mlPrediction?.modelVersion ?? "heuristic-rules-v2", featureVersion: mlPrediction?.featureVersion ?? "isotropic-geometry-v2", source: mlPrediction?.source ?? "heuristic", calibratedConfidence: mlPrediction?.calibratedConfidence ?? null, faultScores: mlPrediction?.mistakeProbabilities, suppressionReason: mlPrediction?.suppressionReason, evaluationStatus: mlPrediction?.evaluationStatus ?? "disabled", supportedFaults: mlPrediction?.supportedFaults ?? [] },
           type: mode === "dance" ? "dance" : exerciseRef.current.category === "cardio" ? "cardio" : "strength",
           exerciseType: exerciseIdRef.current,
           duration: Math.max(1, Math.round(secondsRef.current / 60)),
@@ -1757,10 +1284,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
           repData: repDataRef.current,
           feedbackEvents: eventsRef.current,
           sessionAnalysis,
-        }),
       });
-      const data = await parseApiResponse(response);
-      if (!response.ok) throw new Error(data?.error || "Failed to save session");
       if (data?.coachAgent) {
         setPostSessionAgent(data.coachAgent);
         setAgentReport(data.coachAgent);
@@ -1774,7 +1298,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
         nextCurlMemory = summarizeCurlCoachMemory(curlEvidence);
         setCurlCoachMemory(nextCurlMemory);
         try {
-          window.localStorage.setItem(CURL_MEMORY_KEY, JSON.stringify(nextCurlMemory));
+          curlMemoryKey && window.localStorage.setItem(curlMemoryKey, JSON.stringify(nextCurlMemory));
         } catch {}
       }
       const summaryRes = await fetch("/api/coach/summarize", {
@@ -1819,11 +1343,13 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save session");
     } finally {
+      savingRef.current = false;
       stopCamera({ preserveResults: true });
     }
   };
 
   const loadCurlTeacherDemo = () => {
+    if (process.env.NODE_ENV === "production") return;
     stopCamera();
     reset();
     setExerciseId("bicep_curl");
@@ -1879,13 +1405,11 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
       tempoControl: Math.round(average(evidence.repScorecards.map((rep) => rep.metrics.tempo.score))),
       torsoStability: Math.round(average(evidence.repScorecards.map((rep) => rep.metrics.torsoStability.score))),
     });
-    try {
-      window.localStorage.setItem(CURL_MEMORY_KEY, JSON.stringify(nextMemory));
-    } catch {}
     toast.success("Teacher demo loaded");
   };
 
   const activateDemoFallback = () => {
+    if (process.env.NODE_ENV === "production") return;
     if (mode === "workout") {
       loadCurlTeacherDemo();
       setPostSessionAgent(agentReport);
@@ -2110,10 +1634,11 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
 
   useEffect(() => {
     try {
-      const stored = window.localStorage.getItem(CURL_MEMORY_KEY);
+      setCurlCoachMemory(null);
+      const stored = curlMemoryKey ? window.localStorage.getItem(curlMemoryKey) : null;
       if (stored) setCurlCoachMemory(JSON.parse(stored) as CurlCoachMemory);
     } catch {}
-  }, []);
+  }, [curlMemoryKey]);
 
   useEffect(() => {
     initParticlesEngine(async (engine) => {
@@ -2213,14 +1738,14 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
 
   const qualityPercent = useMemo(() => Math.round(confidence.avgVisibility * 100), [confidence.avgVisibility]);
   const requiredCalibrationFrames = calibrationFramesForExercise(exerciseId);
-  const calibrationReady = isFastStartExercise(exerciseId) ? cameraOn : cameraOn && confidence.ready && calibrationHoldProgress >= requiredCalibrationFrames;
+  const calibrationReady = cameraOn && confidence.ready && calibrationHoldProgress >= requiredCalibrationFrames && (exerciseId !== "bicep_curl" || !!curlBaseline?.ready);
   const calibrationMessage =
     exerciseId === "bicep_curl" && cameraOn
       ? curlBaseline?.ready
         ? "Curl coach is ready. You can start now; calibration keeps refining during reps."
-        : "Fast curl start is enabled. Start now, then keep shoulders, elbows, and wrists visible."
+        : "Keep shoulders, elbows, wrists, and hips visible to finish curl calibration."
       : exerciseId === "dance_basic" && cameraOn
-        ? "Fast dance start is enabled. Start now; phrase timing and reliability will refine as you move."
+        ? calibrationReady ? "Ready for the packaged starter routine." : confidence.message
       : confidence.ready && calibrationHoldProgress < requiredCalibrationFrames
         ? "Hold steady so the coach can lock onto your setup."
         : confidence.message;
@@ -2258,7 +1783,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
         : [],
     [mlPrediction],
   );
-  const liveIssues = useMemo(() => [...analysis.injuryRisks, ...analysis.corrections, ...analysis.issues].slice(0, 5), [analysis]);
+  const liveIssues = useMemo(() => Array.from(new Set([...analysis.injuryRisks, ...analysis.corrections, ...analysis.issues])).slice(0, 5), [analysis]);
   const coachLevelDetail = useMemo(() => COACH_LEVELS.find((item) => item.id === coachLevel)?.detail ?? COACH_LEVELS[1].detail, [coachLevel]);
   const curlEvidence = useMemo(() => (exerciseId === "bicep_curl" ? summarizeCurlEvidence(curlRepScorecards) : null), [curlRepScorecards, exerciseId]);
   const squatEvidence = useMemo(() => (exerciseId === "squat" ? summarizeSquatEvidence(squatRepScorecards) : null), [squatRepScorecards, exerciseId]);
@@ -2318,7 +1843,18 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
     [cameraOn, cameraProfileLabel, confidence.avgVisibility, confidence.brightness, confidence.centered, confidence.tooClose, confidence.tooFar, curlBaseline],
   );
 
+  useEffect(() => { cameraControllerRef.current?.setPreviewVisible(cameraViewMode !== "minimized"); }, [cameraViewMode]);
+  const cameraImageAspect = (videoRef.current?.videoWidth || 16) / (videoRef.current?.videoHeight || 9);
+  const cameraBoxAspect = cameraLayout === "portrait" ? 3/4 : 16/9;
+  const cameraGuideStyle = cameraImageAspect >= cameraBoxAspect ? { width: "100%", aspectRatio: cameraImageAspect } : { height: "100%", aspectRatio: cameraImageAspect };
   const cameraViewport = (
+    <>
+    <SessionSaveStatus count={persistence.pendingCount} error={persistence.saveError} retry={persistence.retry} />
+    <Button className="my-2" variant="outline" disabled={!cameraOn} onClick={() => {
+      const next = cameraFacing === "user" ? "environment" : "user";
+      void cameraControllerRef.current?.setFacingMode(next).then(() => { setCameraFacing(next); setMirror(next === "user"); }).catch(() => toast.error("Camera could not be switched"));
+    }}>Switch to {cameraFacing === "user" ? "rear" : "front"} camera</Button>
+
     <div
       className={cn(
         "relative overflow-hidden rounded-[28px] border bg-black shadow-[0_30px_100px_rgba(0,0,0,0.45)] transition-all duration-500",
@@ -2335,9 +1871,9 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
         autoPlay
         muted
         playsInline
-        className={cn("h-full w-full object-cover", mirror && "scale-x-[-1]")}
+        className={cn("h-full w-full object-contain", mirror && "scale-x-[-1]")}
       />
-      <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 h-full w-full z-20" />
+      <canvas ref={overlayRef} data-testid="pose-overlay" className="pointer-events-none absolute inset-0 h-full w-full object-contain z-20" />
       {hudMode === "3d" && (
         <canvas ref={threeCanvasRef} className="pointer-events-none absolute inset-0 h-full w-full z-10" />
       )}
@@ -2349,14 +1885,14 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
         />
       )}
       {exerciseId === "bicep_curl" && curlReferenceOverlay ? (
-        <div className="pointer-events-none absolute inset-0">
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center"><div className="relative" style={cameraGuideStyle}>
           <div className="absolute left-[18%] top-[28%] h-[42%] w-[22%] rounded-full border border-cyan-300/25" />
           <div className="absolute right-[18%] top-[28%] h-[42%] w-[22%] rounded-full border border-cyan-300/25" />
           <div className="absolute left-1/2 top-[30%] h-[42%] w-px -translate-x-1/2 bg-cyan-300/20" />
           <div className="absolute bottom-[18%] left-1/2 -translate-x-1/2 rounded-full border border-cyan-300/30 bg-zinc-950/55 px-3 py-1 text-xs text-cyan-100">
             Keep elbows close; forearms travel inside the guide.
           </div>
-        </div>
+        </div></div>
       ) : null}
 
       <div className="pointer-events-none absolute left-4 top-4 flex flex-wrap gap-2">
@@ -2418,7 +1954,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
             cameraState={{
               quality: confidence.frameQuality,
               readiness: qualityPercent,
-              canUseDemoFallback: cameraOn && !calibrationReady && qualityPercent < 55,
+              canUseDemoFallback: process.env.NODE_ENV !== "production" && cameraOn && !calibrationReady && qualityPercent < 55,
             }}
             onEnableCamera={startCamera}
             onStartSession={startSession}
@@ -2478,6 +2014,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
         </div>
       ) : null}
     </div>
+    </>
   );
 
   return (
@@ -2536,10 +2073,10 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                             </Button>
                           ))}
                         </div>
-                        <Button size="sm" variant="outline" className="border-cyan-700/60 bg-cyan-500/10 text-cyan-100" onClick={loadCurlTeacherDemo}>
+                        {process.env.NODE_ENV !== "production" && <Button size="sm" variant="outline" className="border-cyan-700/60 bg-cyan-500/10 text-cyan-100" onClick={loadCurlTeacherDemo}>
                           <Clipboard className="h-4 w-4" />
                           Teacher demo
-                        </Button>
+                        </Button>}
                         {exerciseId === "bicep_curl" ? (
                           <Button size="sm" variant="outline" className="border-zinc-700 bg-zinc-950 text-zinc-200" onClick={() => setCurlReferenceOverlay((value) => !value)}>
                             <Target className="h-4 w-4" />
@@ -2553,7 +2090,33 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
               </CardHeader>
             </Card>
 
-            {cameraViewMode === "full" ? cameraViewport : null}
+        <div
+          data-testid="camera-preview"
+          className={cn(cameraViewMode === "pip" && "fixed z-50 w-[340px] max-w-[calc(100vw-32px)]", cameraViewMode === "minimized" && "fixed h-px w-px overflow-hidden opacity-0 pointer-events-none")}
+          aria-hidden={cameraViewMode === "minimized"}
+          inert={cameraViewMode === "minimized"}
+          style={cameraViewMode === "pip" ? { right: `${pipPos.x}px`, bottom: `${pipPos.y}px` } : undefined}
+          onPointerMove={onPipPointerMove}
+          onPointerUp={onPipPointerUp}
+        >
+          <div className={cn(cameraViewMode === "pip" && "overflow-hidden rounded-[28px] border border-zinc-700 bg-zinc-950/95 shadow-[0_30px_100px_rgba(0,0,0,0.55)] backdrop-blur")}>
+            <div className={cn("items-center justify-between border-b border-zinc-800 px-4 py-3 text-sm text-zinc-200", cameraViewMode === "pip" ? "flex" : "hidden")}>
+              <button type="button" className="flex items-center gap-2" onPointerDown={onPipPointerDown}>
+                <GripVertical className="h-4 w-4 text-zinc-500" />
+                Camera monitor
+              </button>
+              <div className="flex gap-2">
+                <Button aria-label="Minimize camera preview" size="icon" variant="ghost" className="h-8 w-8 text-zinc-300 hover:bg-zinc-800" onClick={() => setCameraViewMode("minimized")}>
+                  <Minimize2 className="h-4 w-4" />
+                </Button>
+                <Button aria-label="Expand camera preview" size="icon" variant="ghost" className="h-8 w-8 text-zinc-300 hover:bg-zinc-800" onClick={() => setCameraViewMode("full")}>
+                  <Maximize2 className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            {cameraViewport}
+          </div>
+        </div>
 
             {cameraViewMode === "minimized" ? (
               <Card className="border-zinc-800 bg-zinc-950/70 text-zinc-100">
@@ -2577,7 +2140,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                 <CardDescription className="text-zinc-400">
                   {exerciseId === "bicep_curl"
                     ? `${coachLevel[0].toUpperCase()}${coachLevel.slice(1)} curl coaching: ${coachLevelDetail}`
-                    : "Research-grade posture guidance: safety and camera confidence gate every cue. This is not a medical device."}
+                    : "Camera-based posture guidance: visibility and camera confidence gate every cue. This is not a medical device."}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -2805,7 +2368,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
             <Card className="border-zinc-800 bg-zinc-950/70 text-zinc-100">
               <CardHeader>
                 <CardTitle>Score breakdown</CardTitle>
-                <CardDescription className="text-zinc-400">The live score combines measured movement metrics with research-grade ML evidence. It is not a medical-device assessment.</CardDescription>
+                <CardDescription className="text-zinc-400">Scores reflect visible movement measurements. Learned form assessment stays disabled until validated.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 {exerciseId === "squat" || exerciseId === "bicep_curl" ? (
@@ -2814,14 +2377,14 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                       <div>
                         <div className="flex items-center gap-2">
                           <Brain className="h-4 w-4 text-cyan-200" />
-                          <p className="text-sm font-medium text-cyan-100">ML posture evaluator</p>
+                          <p className="text-sm font-medium text-cyan-100">Posture evidence</p>
                         </div>
                         <p className="mt-2 text-sm text-zinc-300">
                           {mlPrediction
                             ? mlPrediction.suppressed
-                              ? "ML posture claims are suppressed because camera confidence is too low."
-                              : `Predicted movement quality ${mlPrediction.predictedQuality}/100 from recent landmark-window features.`
-                            : "Start the camera to collect landmark-window features for ML posture scoring."}
+                              ? "Posture indicators unavailable because tracking is unreliable."
+                              : `${mlPrediction.source === "learned" ? "Learned" : "Rule"} indicators ${mlPrediction.predictedQuality}/100. Status: ${mlPrediction.evaluationStatus}.`
+                            : "Start the camera to collect visible movement measurements."}
                         </p>
                       </div>
                       <div className="grid min-w-40 grid-cols-2 gap-2 text-center">
@@ -2831,7 +2394,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                         </div>
                         <div className="rounded-xl border border-cyan-400/20 bg-zinc-950/50 p-3">
                           <p className="text-xs text-zinc-500">Confidence</p>
-                          <p className="mt-1 text-xl font-semibold text-cyan-200">{mlPrediction ? `${Math.round(mlPrediction.modelConfidence * 100)}%` : "--"}</p>
+                          <p className="mt-1 text-xl font-semibold text-cyan-200">{mlPrediction?.calibratedConfidence != null ? `${Math.round(mlPrediction.calibratedConfidence * 100)}%` : "Uncalibrated"}</p>
                         </div>
                       </div>
                     </div>
@@ -2841,7 +2404,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                           <div key={item.key} className="rounded-xl border border-zinc-800 bg-zinc-950/60 px-3 py-2">
                             <div className="flex items-center justify-between gap-3 text-sm">
                               <span className="font-medium text-zinc-100">{item.label}</span>
-                              <span className="text-cyan-200">{Math.round(item.probability * 100)}%</span>
+                              <span className="text-cyan-200">{Math.round(item.probability * 100)}{mlPrediction?.source === "learned" ? "%" : " / 100 indicator"}</span>
                             </div>
                             <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-zinc-800">
                               <div className="h-full rounded-full bg-cyan-400" style={{ width: `${Math.round(item.probability * 100)}%` }} />
@@ -2850,7 +2413,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
                         ))}
                       </div>
                     ) : null}
-                    <p className="mt-3 text-xs text-zinc-500">Model: {mlPrediction?.modelVersion ?? "research-grade-seed-v0"} • evidence-only coaching, not diagnosis</p>
+                    <p className="mt-3 text-xs text-zinc-500">Model: {mlPrediction?.modelVersion ?? "heuristic-rules-v2"} • evidence-only coaching, not diagnosis</p>
                   </div>
                 ) : null}
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -3336,32 +2899,7 @@ export default function PoseAnalyzer({ mode = "workout" }: Props) {
         </div>
       </div>
 
-      {cameraViewMode === "pip" ? (
-        <div
-          className="fixed z-50 w-[340px] max-w-[calc(100vw-32px)]"
-          style={{ right: `${pipPos.x}px`, bottom: `${pipPos.y}px` }}
-          onPointerMove={onPipPointerMove}
-          onPointerUp={onPipPointerUp}
-        >
-          <div className="overflow-hidden rounded-[28px] border border-zinc-700 bg-zinc-950/95 shadow-[0_30px_100px_rgba(0,0,0,0.55)] backdrop-blur">
-            <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3 text-sm text-zinc-200">
-              <button type="button" className="flex items-center gap-2" onPointerDown={onPipPointerDown}>
-                <GripVertical className="h-4 w-4 text-zinc-500" />
-                Camera monitor
-              </button>
-              <div className="flex gap-2">
-                <Button size="icon" variant="ghost" className="h-8 w-8 text-zinc-300 hover:bg-zinc-800" onClick={() => setCameraViewMode("minimized")}>
-                  <Minimize2 className="h-4 w-4" />
-                </Button>
-                <Button size="icon" variant="ghost" className="h-8 w-8 text-zinc-300 hover:bg-zinc-800" onClick={() => setCameraViewMode("full")}>
-                  <Maximize2 className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-            {cameraViewport}
-          </div>
-        </div>
-      ) : null}
+
     </div>
   );
 }

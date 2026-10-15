@@ -88,9 +88,9 @@ const workoutTypes = [
 ];
 
 const stats = [
-  { value: "10K+", label: "Active Users" },
+  { value: "Beta", label: "Community" },
   { value: "500+", label: "Workout Plans" },
-  { value: "98%", label: "Satisfaction" },
+  { value: "Local", label: "Camera processing" },
   { value: "24/7", label: "AI Support" },
 ];
 

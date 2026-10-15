@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/server/api";
 import { NextResponse } from "next/server";
 import { requireServerSession } from "@/lib/auth/session";
 import { isDemoUser } from "@/lib/dummy-auth";
@@ -119,7 +120,6 @@ export async function GET(request: Request) {
     const report = await getCoachAgentReport(session.user.id);
     return NextResponse.json(report);
   } catch (error) {
-    const status = error instanceof Error && error.message === "UNAUTHORIZED" ? 401 : 500;
-    return NextResponse.json({ error: status === 401 ? "Unauthorized" : "Failed to load coach agent" }, { status });
+    return apiError(error, request);
   }
 }

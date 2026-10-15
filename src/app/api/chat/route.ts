@@ -1,3 +1,4 @@
+import { apiError, readJson } from "@/lib/server/api";
 import { desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { NextResponse } from "next/server";
@@ -53,17 +54,17 @@ export async function GET(request: Request) {
     });
 
     return NextResponse.json({ messages: messages.reverse() });
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return apiError(error, request);
   }
 }
 
 export async function POST(request: Request) {
   try {
     const session = await requireServerSession(request);
-    const guard = guardMutationRequest(request, {
+    const guard = await guardMutationRequest(request, {
       bucket: "chat",
-      key: `${session.user.id}:${getRequestIp(request)}`,
+      key: session.user.id,
       limit: 24,
       windowMs: 60_000,
     });
@@ -71,13 +72,14 @@ export async function POST(request: Request) {
       return guard;
     }
 
-    const parsed = chatInputSchema.safeParse(await request.json());
+    const parsed = chatInputSchema.safeParse(await readJson(request));
     if (!parsed.success) {
       return NextResponse.json({ error: "Invalid chat payload", details: parsed.error.flatten() }, { status: 400 });
     }
 
     if (isDemoUser(session.user.id)) {
       const generated = await generateCoachMessage({
+        signal: request.signal,
         profile: getDemoProfileFromCookie(request.headers.get("cookie") || "") ?? buildDemoProfile(),
         recentMessages: [],
         sessionSummary: "Demo chat session",
@@ -128,6 +130,7 @@ export async function POST(request: Request) {
         getDashboardSummary(session.user.id),
       ]);
       const generated = await generateCoachMessage({
+        signal: request.signal,
         profile,
         recentMessages: [],
         sessionSummary: "Database-free demo chat session",
@@ -163,6 +166,7 @@ export async function POST(request: Request) {
     ]);
 
     const generated = await generateCoachMessage({
+        signal: request.signal,
       profile,
       recentMessages: recentMessages.reverse().map((message) => ({
         role: message.role as "system" | "user" | "assistant",
@@ -230,7 +234,6 @@ export async function POST(request: Request) {
       providerError: generated.error,
     });
   } catch (error) {
-    const status = error instanceof Error && error.message === "UNAUTHORIZED" ? 401 : 500;
-    return NextResponse.json({ error: status === 401 ? "Unauthorized" : error instanceof Error ? error.message : "Failed to process chat request" }, { status });
+    return apiError(error, request);
   }
 }

@@ -47,12 +47,12 @@ describe("dummy auth demo profile persistence", () => {
     expect(restored.onboardingCompleted).toBe(false);
   });
 
-  it("accepts demo cookies in production unless demo mode is explicitly disabled", () => {
+  it("rejects demo cookies in production even when requested", () => {
     setNodeEnv("production");
     delete process.env.ENABLE_DEMO_MODE;
     delete process.env.NEXT_PUBLIC_ENABLE_DEMO_MODE;
 
-    expect(hasDemoCookie("fitcoach_demo=1")).toBe(true);
+    expect(hasDemoCookie("fitcoach_demo=1")).toBe(false);
 
     process.env.ENABLE_DEMO_MODE = "false";
     expect(hasDemoCookie("fitcoach_demo=1")).toBe(false);

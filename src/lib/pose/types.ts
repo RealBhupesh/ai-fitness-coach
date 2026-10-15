@@ -37,6 +37,8 @@ export type TrackingFrame = {
   fps: number;
   rawLandmarks: Landmark[];
   smoothedLandmarks: Landmark[];
+  analysisLandmarks?: Landmark[];
+  imageAspectRatio?: number;
   worldLandmarks: Landmark[];
   avgVisibility: number;
   posePresence: number;

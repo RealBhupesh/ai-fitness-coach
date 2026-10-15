@@ -1,52 +1,29 @@
 "use client";
-
-import { useEffect } from "react";
+import { useEffect,useState } from "react";
 import { useClerk } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import { clearDemoSession } from "@/lib/dummy-auth";
-
-function ClerkSignOut() {
-  const clerk = useClerk();
-  const router = useRouter();
-
-  useEffect(() => {
-    clearDemoSession();
-    void clerk
-      .signOut()
-      .catch(() => undefined)
-      .finally(() => {
-        router.replace("/");
-        router.refresh();
-      });
-  }, [clerk, router]);
-
-  return (
-    <div className="performance-shell flex min-h-screen items-center justify-center p-4">
-      <p className="text-sm text-muted-foreground">Signing out...</p>
-    </div>
-  );
+import { authClient } from "@/lib/auth/client";
+async function clearLegacySession(){
+ const result=await authClient.signOut();
+ if(result.error && result.error.status!==404)throw new Error("Sign-out could not complete. Please retry.");
 }
-
-function LocalSignOut() {
-  const router = useRouter();
-
-  useEffect(() => {
-    clearDemoSession();
-    router.replace("/");
-    router.refresh();
-  }, [router]);
-
-  return (
-    <div className="performance-shell flex min-h-screen items-center justify-center p-4">
-      <p className="text-sm text-muted-foreground">Signing out...</p>
-    </div>
-  );
+function Status({error}:{error:string|null}){
+ return <div className="performance-shell flex min-h-screen items-center justify-center p-4"><div role="status"><p>{error||"Signing out..."}</p>{error&&<button className="mt-4 underline" onClick={()=>window.location.reload()}>Retry sign-out</button>}</div></div>;
 }
-
-export default function SignOutPage() {
-  if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
-    return <LocalSignOut />;
-  }
-
-  return <ClerkSignOut />;
+function ClerkSignOut(){
+ const clerk=useClerk();const router=useRouter();const [error,setError]=useState<string|null>(null);
+ useEffect(()=>{
+  clearDemoSession();
+  void Promise.all([clearLegacySession(),clerk.signOut()]).then(()=>{router.replace("/");router.refresh();}).catch(()=>setError("Sign-out could not complete. Please retry."));
+ },[clerk,router]);
+ return <Status error={error}/>;
 }
+function LocalSignOut(){
+ const router=useRouter();const [error,setError]=useState<string|null>(null);
+ useEffect(()=>{
+  clearDemoSession();void clearLegacySession().then(()=>{router.replace("/");router.refresh();}).catch(()=>setError("Sign-out could not complete. Please retry."));
+ },[router]);
+ return <Status error={error}/>;
+}
+export default function SignOutPage(){return process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?<ClerkSignOut/>:<LocalSignOut/>;}

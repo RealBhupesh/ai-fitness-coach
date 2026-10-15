@@ -1,4 +1,4 @@
-import { average, clamp, distance } from "@/lib/pose/math";
+import { average, clamp, distance, toAnalysisLandmarks } from "@/lib/pose/math";
 import { evaluateFrameQuality } from "@/lib/pose/quality";
 import type { ConfidenceStatus, ExerciseId, Landmark, TrackingFrame } from "@/lib/pose/types";
 
@@ -88,6 +88,7 @@ export function buildTrackingFrame(options: {
   exerciseId: ExerciseId;
   rawLandmarks: Landmark[];
   worldLandmarks?: Landmark[];
+  imageAspectRatio?: number;
   previousSmoothed: Landmark[] | null;
   timestampMs: number;
   frameIndex: number;
@@ -113,6 +114,8 @@ export function buildTrackingFrame(options: {
     fps: options.fps,
     rawLandmarks: options.rawLandmarks,
     smoothedLandmarks,
+    analysisLandmarks: toAnalysisLandmarks(smoothedLandmarks, options.imageAspectRatio ?? 1),
+    imageAspectRatio: options.imageAspectRatio ?? 1,
     worldLandmarks: options.worldLandmarks ?? [],
     avgVisibility: clamp(avgVisibility, 0, 1),
     posePresence: clamp(avgVisibility, 0, 1),

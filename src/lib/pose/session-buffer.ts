@@ -45,9 +45,10 @@ export function createSessionAnalysisBuffer(): SessionAnalysisBuffer {
   };
 }
 
-export function recordFrame(buffer: SessionAnalysisBuffer, trackingFrame: TrackingFrame, analysis: FrameAnalysis) {
+export function recordFrame(buffer: SessionAnalysisBuffer, trackingFrame: TrackingFrame, analysis: FrameAnalysis, sessionTimestampMs = trackingFrame.timestampMs) {
+  const timestampMs = Math.max(0, Math.round(sessionTimestampMs));
   const point: SessionFramePoint = {
-    timestampMs: trackingFrame.timestampMs,
+    timestampMs,
     overall: analysis.overall,
     form: analysis.form,
     rom: analysis.rom,
@@ -66,7 +67,7 @@ export function recordFrame(buffer: SessionAnalysisBuffer, trackingFrame: Tracki
   const lastPhase = buffer.phaseHistory[buffer.phaseHistory.length - 1];
   if (!lastPhase || lastPhase.phase !== analysis.phase) {
     const phasePoint: SessionPhasePoint = {
-      timestampMs: trackingFrame.timestampMs,
+      timestampMs,
       phase: analysis.phase,
     };
     buffer.phaseHistory.push(phasePoint);
@@ -80,7 +81,7 @@ export function recordCue(buffer: SessionAnalysisBuffer, cue: FeedbackCue, times
   }
 
   buffer.issueHistory.push({
-    timestampMs,
+    timestampMs: Math.max(0, Math.round(timestampMs)),
     signature: cue.signature,
     message: cue.message,
     severity: cue.severity,
@@ -88,7 +89,7 @@ export function recordCue(buffer: SessionAnalysisBuffer, cue: FeedbackCue, times
 }
 
 export function recordTelemetry(buffer: SessionAnalysisBuffer, event: SessionTelemetryEvent) {
-  buffer.telemetry.push(event);
+  buffer.telemetry.push({ ...event, timestampMs: Math.max(0, Math.round(event.timestampMs)) });
 }
 
 export function finalizeSessionAnalysis(buffer: SessionAnalysisBuffer) {

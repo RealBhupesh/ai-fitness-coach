@@ -21,3 +21,10 @@ test("demo entry is hidden when demo mode is disabled", async ({ page }) => {
   await page.goto("/signup");
   await expect(page.getByRole("button", { name: /continue as demo user/i })).toHaveCount(0);
 });
+
+test("production never authenticates a demo cookie",async({request})=>{
+ test.skip(!process.env.PLAYWRIGHT_USE_BUILD,"Production configuration check");
+ const response=await request.get("/api/session",{headers:{cookie:"fitcoach_demo=1"}});
+ expect([401,503]).toContain(response.status());
+ expect(await response.json()).not.toHaveProperty("user");
+});

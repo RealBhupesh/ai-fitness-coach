@@ -20,7 +20,7 @@ export const dietaryPrefSchema = z.enum([
 
 export const profileInputSchema = z.object({
   name: z.string().min(1).max(120).optional(),
-  age: z.number().int().min(10).max(100).optional(),
+  age: z.number().int().min(18).max(100).optional(),
   gender: z.enum(["male", "female", "non_binary", "prefer_not_to_say", "other"]).optional(),
   heightCm: z.number().min(50).max(250).optional(),
   weightKg: z.number().min(20).max(400).optional(),
@@ -234,6 +234,16 @@ export const workoutPlanCreateSchema = z.object({
 });
 
 export const workoutSessionInputSchema = z.object({
+  clientSessionId: z.string().uuid(),
+  modelEvidence: z.object({
+    artifactVersion: z.string().max(120), featureVersion: z.string().max(120),
+    source: z.enum(["heuristic", "learned"]).optional(),
+    calibratedConfidence: z.number().min(0).max(1).nullable().optional(),
+    faultScores: z.record(z.string().max(80), z.number().min(0).max(1)).optional(),
+    suppressionReason: z.string().max(300).optional(),
+    evaluationStatus: z.enum(["heuristic", "shadow", "validated", "disabled"]),
+    supportedFaults: z.array(z.string().max(80)).max(12),
+  }).optional(),
   type: z.string().min(1).max(80),
   exerciseType: z.string().max(80).optional(),
   duration: z.number().int().min(0).max(720).default(0),
@@ -261,7 +271,7 @@ export const workoutSessionInputSchema = z.object({
       endurance: 0,
       safety: 0,
     }),
-  fatigueCurve: z.array(z.number().min(0).max(100)).default([]),
+  fatigueCurve: z.array(z.number().min(0).max(100)).max(5000).default([]),
   danceSegments: z
     .array(
       z.object({
@@ -291,7 +301,7 @@ export const workoutSessionInputSchema = z.object({
         corrections: z.array(z.string()).default([]),
       }),
     )
-    .default([]),
+    .max(100).default([]),
   repData: z
     .array(
       z.object({
@@ -315,7 +325,7 @@ export const workoutSessionInputSchema = z.object({
         squatScorecard: squatRepScorecardSchema.nullable().optional(),
       }),
     )
-    .default([]),
+    .max(5000).default([]),
   sessionAnalysis: z
     .object({
       frameQualityStats: z.record(z.string(), z.number().int().min(0)).default({}),
@@ -343,7 +353,7 @@ export const workoutSessionInputSchema = z.object({
             timestampMs: z.number().int().min(0),
             type: z.string().min(1).max(80),
             message: z.string().min(1).max(500),
-            meta: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
+            meta: z.record(z.string().max(64), z.union([z.string().max(160), z.number().finite(), z.boolean(), z.null()])).refine(meta => !Object.keys(meta).some(key => /video|landmark|image|frameData|cookie|token|password/i.test(key)), "Raw media and credentials are not accepted in telemetry").optional(),
           }),
         )
         .default([]),
@@ -376,7 +386,7 @@ export const workoutSessionInputSchema = z.object({
         source: z.enum(["rule_engine", "llm_coach", "system"]),
       }),
     )
-    .default([]),
+    .max(1000).default([]),
 });
 
 export const reviewLabExportSchema = z.object({

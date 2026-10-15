@@ -1,7 +1,9 @@
+import { apiError } from "@/lib/server/api";
 import { NextResponse } from "next/server";
 import { getServerSession } from "@/lib/auth/session";
 
 export async function GET(request: Request) {
+  try {
   const session = await getServerSession(request);
 
   if (!session?.user?.id) {
@@ -20,4 +22,5 @@ export async function GET(request: Request) {
       image: session.user.image ?? null,
     },
   });
+  } catch (error) { return apiError(error, request); }
 }

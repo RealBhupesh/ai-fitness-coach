@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { sql, and, desc, eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db, isDatabaseConfigured } from "@/db";
 import { danceCourseAttempts, danceCourseProgress, users, workoutSessions } from "@/db/schema";
@@ -126,7 +126,8 @@ export async function getDanceCourseState(userId: string, routine: DanceRoutineP
   return buildDanceCourseState({ routine, progressRows, attemptRows, leaderboard });
 }
 
-export async function recordDanceCourseAttempt(userId: string, input: DanceCourseAttemptInput) {
+export async function recordDanceCourseAttempt(userId: string, input: DanceCourseAttemptInput, database: Pick<typeof db, "query" | "insert" | "update" | "execute"> = db): Promise<{ completed: boolean; status: string; bestScore: number; bestReliability: number; attempts: number }> {
+  if (isDatabaseConfigured && database === db) return db.transaction(tx => recordDanceCourseAttempt(userId, input, tx));
   const now = new Date();
   const score = clampDanceScore(input.score);
   const reliability = clampDanceScore(input.reliability);
@@ -144,7 +145,8 @@ export async function recordDanceCourseAttempt(userId: string, input: DanceCours
     };
   }
 
-  const existing = await db.query.danceCourseProgress.findFirst({
+  await database.execute(sql`select pg_advisory_xact_lock(hashtextextended(${userId + ":" + input.routineId + ":" + input.segmentId}, 0))`);
+  const existing = await database.query.danceCourseProgress.findFirst({
     where: and(
       eq(danceCourseProgress.userId, userId),
       eq(danceCourseProgress.routineId, input.routineId),
@@ -152,7 +154,7 @@ export async function recordDanceCourseAttempt(userId: string, input: DanceCours
     ),
   });
 
-  await db.insert(danceCourseAttempts).values({
+  await database.insert(danceCourseAttempts).values({
     id: nanoid(),
     userId,
     routineId: input.routineId,
@@ -176,7 +178,7 @@ export async function recordDanceCourseAttempt(userId: string, input: DanceCours
   const completedAt = existing?.completedAt ?? (nextStatus === "completed" ? now : null);
 
   if (existing) {
-    await db
+    await database
       .update(danceCourseProgress)
       .set({
         bestScore: nextBestScore,
@@ -189,7 +191,7 @@ export async function recordDanceCourseAttempt(userId: string, input: DanceCours
       })
       .where(eq(danceCourseProgress.id, existing.id));
   } else {
-    await db.insert(danceCourseProgress).values({
+    await database.insert(danceCourseProgress).values({
       id: nanoid(),
       userId,
       routineId: input.routineId,

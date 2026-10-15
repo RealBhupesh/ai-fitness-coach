@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/server/api";
 import { NextResponse } from "next/server";
 import { requireServerSession } from "@/lib/auth/session";
 import { isDemoUser } from "@/lib/dummy-auth";
@@ -56,7 +57,7 @@ export async function GET(request: Request) {
       achievements: achievementRows,
       closestAchievement,
     });
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return apiError(error, request);
   }
 }

@@ -1,3 +1,4 @@
+import { apiError, readJson } from "@/lib/server/api";
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -24,16 +25,16 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ profile });
   } catch (error) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(error, request);
   }
 }
 
 export async function POST(request: Request) {
   try {
     const session = await requireServerSession(request);
-    const guard = guardMutationRequest(request, {
+    const guard = await guardMutationRequest(request, {
       bucket: "profile",
-      key: `${session.user.id}:${getRequestIp(request)}`,
+      key: session.user.id,
       limit: 20,
       windowMs: 60_000,
     });
@@ -41,7 +42,7 @@ export async function POST(request: Request) {
       return guard;
     }
 
-    const parsed = profileInputSchema.safeParse(await request.json());
+    const parsed = profileInputSchema.safeParse(await readJson(request));
     if (!parsed.success) {
       return NextResponse.json({ error: "Invalid profile payload", details: parsed.error.flatten() }, { status: 400 });
     }
@@ -98,17 +99,16 @@ export async function POST(request: Request) {
     const profile = await getAppProfile(session.user.id);
     return NextResponse.json({ message: "Profile updated successfully", profile });
   } catch (error) {
-    const status = error instanceof Error && error.message === "UNAUTHORIZED" ? 401 : 500;
-    return NextResponse.json({ error: status === 401 ? "Unauthorized" : "Failed to save profile" }, { status });
+    return apiError(error, request);
   }
 }
 
 export async function DELETE(request: Request) {
   try {
     const session = await requireServerSession(request);
-    const guard = guardMutationRequest(request, {
+    const guard = await guardMutationRequest(request, {
       bucket: "profile-delete",
-      key: `${session.user.id}:${getRequestIp(request)}`,
+      key: session.user.id,
       limit: 6,
       windowMs: 5 * 60_000,
     });
@@ -136,6 +136,6 @@ export async function DELETE(request: Request) {
     const profile = await getAppProfile(session.user.id);
     return NextResponse.json({ message: "Profile reset", profile });
   } catch (error) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(error, request);
   }
 }

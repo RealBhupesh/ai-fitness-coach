@@ -1,4 +1,4 @@
-import { boolean, integer, pgTable, real, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, integer, pgTable, real, text, timestamp, uniqueIndex, index } from "drizzle-orm/pg-core";
 
 const createdAt = () => timestamp("created_at", { mode: "date" }).defaultNow().notNull();
 const updatedAt = () => timestamp("updated_at", { mode: "date" }).defaultNow().notNull();
@@ -23,6 +23,32 @@ export const sessions = pgTable("sessions", {
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
+
+export const providerIdentities = pgTable("provider_identities", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  provider: text("provider").notNull(),
+  subject: text("subject").notNull(),
+  createdAt: createdAt(),
+}, table => [uniqueIndex("provider_identity_unique").on(table.provider, table.subject), uniqueIndex("provider_identity_user_unique").on(table.userId, table.provider)]);
+
+export const userSettings = pgTable("user_settings", {
+  userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  units: text("units").notNull().default("metric"),
+  theme: text("theme").notNull().default("system"),
+  updatedAt: updatedAt(),
+});
+
+// Survives local deletion so failed external cleanup can be retried.
+export const accountDeletionJobs = pgTable("account_deletion_jobs", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  provider: text("provider").notNull(),
+  subject: text("subject").notNull(),
+  completed: boolean("completed").notNull().default(false),
+  attempts: integer("attempts").notNull().default(0),
+  createdAt: createdAt(),
+}, table => [uniqueIndex("account_deletion_identity_unique").on(table.provider, table.subject)]);
 
 export const accounts = pgTable("accounts", {
   id: text("id").primaryKey(),
@@ -142,6 +168,9 @@ export const workoutPlans = pgTable("workout_plans", {
 export const workoutSessions = pgTable("workout_sessions", {
   id: text("id").primaryKey(),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  clientSessionId: text("client_session_id"),
+  payloadHash: text("payload_hash"),
+  modelEvidence: text("model_evidence"),
   planId: text("plan_id").references(() => workoutPlans.id, { onDelete: "set null" }),
   type: text("type").notNull(),
   exerciseType: text("exercise_type"),
@@ -165,7 +194,7 @@ export const workoutSessions = pgTable("workout_sessions", {
   telemetry: text("telemetry"),
   postSetAnalysis: text("post_set_analysis"),
   createdAt: createdAt(),
-});
+}, table => [uniqueIndex("workout_session_client_unique").on(table.userId, table.clientSessionId), index("workout_session_user_date_idx").on(table.userId, table.date)]);
 
 export const workoutExercises = pgTable("workout_exercises", {
   id: text("id").primaryKey(),

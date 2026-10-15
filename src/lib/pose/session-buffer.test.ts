@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { workoutSessionInputSchema } from "@/lib/validation/schemas";
 import { createSessionAnalysisBuffer, finalizeSessionAnalysis, recordCue, recordFrame, recordTelemetry } from "@/lib/pose/session-buffer";
 import type { FeedbackCue } from "@/lib/feedback/state";
 import type { FrameAnalysis, TrackingFrame } from "@/lib/pose/types";
@@ -71,4 +72,16 @@ describe("session analysis buffer", () => {
     expect(result.postSet.recurringIssues[0]).toBe("Drive your knees out.");
     expect(result.postSet.stabilityAverage).toBeGreaterThan(0);
   });
+  it("serializes fractional camera timestamps as valid session evidence", () => {
+    const buffer=createSessionAnalysisBuffer();
+    recordFrame(buffer,makeTrackingFrame(1234.56),makeAnalysis(80,"top"));
+    recordTelemetry(buffer,{timestampMs:1234.56,type:"calibration_ready",message:"Tracking recovered."});
+    const result=workoutSessionInputSchema.safeParse({clientSessionId:crypto.randomUUID(),type:"strength",sessionAnalysis:finalizeSessionAnalysis(buffer)});
+    expect(result.success).toBe(true);
+    expect(buffer.phaseHistory[0].timestampMs).toBe(1235);
+    expect(buffer.telemetry[0].timestampMs).toBe(1235);
+    recordFrame(buffer,makeTrackingFrame(5000.3),makeAnalysis(80,"descent"),25.2);
+    expect(buffer.phaseHistory[1].timestampMs).toBe(25);
+  });
+
 });

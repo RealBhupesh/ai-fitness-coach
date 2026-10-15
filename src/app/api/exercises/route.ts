@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/server/api";
 import { NextRequest, NextResponse } from "next/server";
 import { db, isDatabaseConfigured } from "@/db";
 import { exercises, danceStyles } from "@/db/schema";
@@ -78,10 +79,6 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ exercises: rows });
   } catch (error) {
-    console.error("Exercises API Error:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch exercises" },
-      { status: 500 }
-    );
+    return apiError(error, request);
   }
 }

@@ -1,3 +1,4 @@
+import { apiError, readJson } from "@/lib/server/api";
 import { NextResponse } from "next/server";
 import { requireServerSession } from "@/lib/auth/session";
 import { REVIEW_LAB_METHODOLOGY } from "@/lib/review-lab/methodology";
@@ -7,9 +8,9 @@ import { reviewLabExportSchema } from "@/lib/validation/schemas";
 export async function POST(request: Request) {
   try {
     const session = await requireServerSession(request);
-    const guard = guardMutationRequest(request, {
+    const guard = await guardMutationRequest(request, {
       bucket: "review-lab-export",
-      key: `${session.user.id}:${getRequestIp(request)}`,
+      key: session.user.id,
       limit: 20,
       windowMs: 60_000,
     });
@@ -17,7 +18,7 @@ export async function POST(request: Request) {
       return guard;
     }
 
-    const parsed = reviewLabExportSchema.safeParse(await request.json());
+    const parsed = reviewLabExportSchema.safeParse(await readJson(request));
     if (!parsed.success) {
       return NextResponse.json({ error: "Invalid export request", details: parsed.error.flatten() }, { status: 400 });
     }
@@ -36,7 +37,7 @@ export async function POST(request: Request) {
         methodology: REVIEW_LAB_METHODOLOGY,
       },
     });
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return apiError(error, request);
   }
 }

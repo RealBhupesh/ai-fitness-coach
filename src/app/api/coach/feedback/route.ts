@@ -1,3 +1,4 @@
+import { apiError, readJson } from "@/lib/server/api";
 import { NextResponse } from "next/server";
 import { requireServerSession } from "@/lib/auth/session";
 import { generateCoachFeedback } from "@/lib/ai/coach";
@@ -8,9 +9,9 @@ import { guardMutationRequest, getRequestIp } from "@/lib/security/request-guard
 export async function POST(request: Request) {
   try {
     const session = await requireServerSession(request);
-    const guard = guardMutationRequest(request, {
+    const guard = await guardMutationRequest(request, {
       bucket: "coach-feedback",
-      key: `${session.user.id}:${getRequestIp(request)}`,
+      key: session.user.id,
       limit: 30,
       windowMs: 60_000,
     });
@@ -18,20 +19,20 @@ export async function POST(request: Request) {
       return guard;
     }
 
-    const parsed = coachFeedbackInputSchema.safeParse(await request.json());
+    const parsed = coachFeedbackInputSchema.safeParse(await readJson(request));
     if (!parsed.success) {
       return NextResponse.json({ error: "Invalid feedback payload", details: parsed.error.flatten() }, { status: 400 });
     }
 
-    let profile = await getAppProfile(session.user.id).catch(() => null);
+    const profile = await getAppProfile(session.user.id);
     const feedback = await generateCoachFeedback({
+      signal: request.signal,
       profile,
       ...parsed.data,
     });
 
     return NextResponse.json(feedback);
   } catch (error) {
-    const status = error instanceof Error && error.message === "UNAUTHORIZED" ? 401 : 500;
-    return NextResponse.json({ error: status === 401 ? "Unauthorized" : "Failed to generate feedback" }, { status });
+    return apiError(error, request);
   }
 }

@@ -30,6 +30,12 @@ export function angle(a?: Landmark | null, b?: Landmark | null, c?: Landmark | n
   return (Math.acos(cosine) * 180) / Math.PI;
 }
 
+/** Convert width/height-normalized image points into isotropic height units. */
+export function toAnalysisLandmarks(points: Landmark[], aspectRatio: number): Landmark[] {
+  if (!Number.isFinite(aspectRatio) || aspectRatio <= 0) throw new Error("Invalid image aspect ratio");
+  return points.map(point => ({ ...point, x: point.x * aspectRatio, z: (point.z ?? 0) * aspectRatio }));
+}
+
 export function scoreFromTarget(value: number, target: number, tolerance: number) {
   const deviation = Math.abs(value - target);
   return clamp(Math.round(100 - (deviation / Math.max(tolerance, 1)) * 100), 0, 100);

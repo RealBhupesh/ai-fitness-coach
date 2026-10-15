@@ -1,3 +1,4 @@
+import { apiError, readJson } from "@/lib/server/api";
 import { desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { NextResponse } from "next/server";
@@ -19,17 +20,17 @@ export async function GET(request: Request) {
       limit: 100,
     });
     return NextResponse.json({ entries });
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return apiError(error, request);
   }
 }
 
 export async function POST(request: Request) {
   try {
     const session = await requireServerSession(request);
-    const guard = guardMutationRequest(request, {
+    const guard = await guardMutationRequest(request, {
       bucket: "nutrition-log",
-      key: `${session.user.id}:${getRequestIp(request)}`,
+      key: session.user.id,
       limit: 20,
       windowMs: 60_000,
     });
@@ -37,7 +38,7 @@ export async function POST(request: Request) {
       return guard;
     }
 
-    const parsed = foodLogInputSchema.safeParse(await request.json());
+    const parsed = foodLogInputSchema.safeParse(await readJson(request));
     if (!parsed.success) {
       return NextResponse.json({ error: "Invalid food log payload", details: parsed.error.flatten() }, { status: 400 });
     }
@@ -62,7 +63,7 @@ export async function POST(request: Request) {
     await db.insert(foodLog).values(entry);
 
     return NextResponse.json({ entry });
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return apiError(error, request);
   }
 }

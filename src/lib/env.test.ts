@@ -1,54 +1,26 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { describeServerEnvState, isDemoModeEnabled, validateServerEnv } from "@/lib/env";
-
-const ORIGINAL_ENV = { ...process.env };
-
-afterEach(() => {
-  process.env = { ...ORIGINAL_ENV };
-});
-
-function setNodeEnv(value: NodeJS.ProcessEnv["NODE_ENV"]) {
-  Object.defineProperty(process.env, "NODE_ENV", {
-    value,
-    configurable: true,
-    enumerable: true,
-    writable: true,
-  });
-}
-
-describe("environment production gates", () => {
-  it("enables demo mode by default for showcase deployments", () => {
-    setNodeEnv("development");
-    delete process.env.NEXT_PUBLIC_ENABLE_DEMO_MODE;
-    delete process.env.ENABLE_DEMO_MODE;
-    expect(isDemoModeEnabled()).toBe(true);
-
-    setNodeEnv("production");
-    expect(isDemoModeEnabled()).toBe(true);
-  });
-
-  it("allows explicit demo-mode override", () => {
-    setNodeEnv("production");
-    process.env.ENABLE_DEMO_MODE = "true";
-    expect(isDemoModeEnabled()).toBe(true);
-
-    process.env.ENABLE_DEMO_MODE = "false";
-    process.env.NEXT_PUBLIC_ENABLE_DEMO_MODE = "1";
-    expect(isDemoModeEnabled()).toBe(true);
-
-    process.env.NEXT_PUBLIC_ENABLE_DEMO_MODE = "false";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { isDemoModeEnabled, validateServerEnv, getTrustedOrigins } from "@/lib/env";
+afterEach(() => vi.unstubAllEnvs());
+describe("production gates", () => {
+  it("requires explicit demo flags and always disables production demo auth", () => {
+    vi.stubEnv("NODE_ENV", "development"); vi.stubEnv("ENABLE_DEMO_MODE", "false"); vi.stubEnv("NEXT_PUBLIC_ENABLE_DEMO_MODE", "false");
     expect(isDemoModeEnabled()).toBe(false);
+    vi.stubEnv("ENABLE_DEMO_MODE", "true"); expect(isDemoModeEnabled()).toBe(true);
+    vi.stubEnv("NODE_ENV", "production"); expect(isDemoModeEnabled()).toBe(false); expect(validateServerEnv().invalid).toContain("ENABLE_DEMO_MODE");
   });
-
-  it("rejects placeholder production secrets", () => {
-    setNodeEnv("production");
-    process.env.DATABASE_URL = "postgres://postgres:postgres@localhost:5432/fitcoach";
-    process.env.BETTER_AUTH_SECRET = "your-secret-key-change-in-production";
-
-    const state = validateServerEnv();
-
-    expect(state.ok).toBe(false);
-    expect(state.invalid).toContain("BETTER_AUTH_SECRET");
-    expect(describeServerEnvState(state)).toBe("invalid: BETTER_AUTH_SECRET");
+  it("rejects incomplete production configuration", () => {
+    vi.stubEnv("NODE_ENV", "production"); vi.stubEnv("DATABASE_URL", ""); vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "");
+    const result = validateServerEnv(); expect(result.ok).toBe(false); expect(result.missing).toContain("DATABASE_URL"); expect(result.missing).toContain("UPSTASH_REDIS_REST_TOKEN");
+  });
+  it("rejects published development secrets in production", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    for (const secret of ["fitcoach-demo-only-fallback-secret-for-vercel-preview", "replace-with-a-random-development-secret-at-least-32-characters"]) {
+      vi.stubEnv("BETTER_AUTH_SECRET", secret);
+      expect(validateServerEnv().invalid).toContain("BETTER_AUTH_SECRET");
+    }
+  });
+  it("does not expand localhost origins in production", () => {
+    vi.stubEnv("NODE_ENV", "production"); vi.stubEnv("NEXT_PUBLIC_APP_URL", "http://localhost:3000"); vi.stubEnv("TRUSTED_ORIGINS", "http://localhost:3000");
+    expect(getTrustedOrigins()).not.toContain("http://localhost:3001");
   });
 });

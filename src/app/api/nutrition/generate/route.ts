@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/server/api";
 import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { NextResponse } from "next/server";
@@ -13,9 +14,9 @@ import { toJson } from "@/lib/utils/json";
 export async function POST(request: Request) {
   try {
     const session = await requireServerSession(request);
-    const guard = guardMutationRequest(request, {
+    const guard = await guardMutationRequest(request, {
       bucket: "generate-nutrition-plan",
-      key: `${session.user.id}:${getRequestIp(request)}`,
+      key: session.user.id,
       limit: 6,
       windowMs: 5 * 60_000,
     });
@@ -26,7 +27,7 @@ export async function POST(request: Request) {
     const profile = isDemoUser(session.user.id)
       ? (getDemoProfileFromCookie(request.headers.get("cookie") || "") ?? buildDemoProfile())
       : await getAppProfile(session.user.id);
-    const generated = await generateNutritionPlan(profile);
+    const generated = await generateNutritionPlan(profile, { signal: request.signal });
     const planData = generated.plan;
 
     const record = {
@@ -45,7 +46,7 @@ export async function POST(request: Request) {
       cuisineType: profile?.cuisinePreference ?? "balanced",
       budgetTier: profile?.budgetTier ?? "medium",
       isActive: true,
-      isAiGenerated: true,
+      isAiGenerated: generated.provider !== "fallback",
       createdAt: new Date(),
     };
 
@@ -74,7 +75,6 @@ export async function POST(request: Request) {
     await db.insert(nutritionPlans).values(record);
     return NextResponse.json({ plan: planData, record, provider: generated.provider, model: generated.model });
   } catch (error) {
-    const status = error instanceof Error && error.message === "UNAUTHORIZED" ? 401 : 500;
-    return NextResponse.json({ error: status === 401 ? "Unauthorized" : error instanceof Error ? error.message : "Failed to generate nutrition plan" }, { status });
+    return apiError(error, request);
   }
 }

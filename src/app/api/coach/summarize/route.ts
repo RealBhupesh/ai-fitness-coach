@@ -1,4 +1,5 @@
-import { eq } from "drizzle-orm";
+import { apiError, readJson, ApiError } from "@/lib/server/api";
+import { eq, and } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db, isDatabaseConfigured } from "@/db";
 import { workoutSessions } from "@/db/schema";
@@ -13,9 +14,9 @@ import { toJson } from "@/lib/utils/json";
 export async function POST(request: Request) {
   try {
     const session = await requireServerSession(request);
-    const guard = guardMutationRequest(request, {
+    const guard = await guardMutationRequest(request, {
       bucket: "coach-summarize",
-      key: `${session.user.id}:${getRequestIp(request)}`,
+      key: session.user.id,
       limit: 12,
       windowMs: 60_000,
     });
@@ -23,20 +24,21 @@ export async function POST(request: Request) {
       return guard;
     }
 
-    const parsed = summarizeInputSchema.safeParse(await request.json());
+    const parsed = summarizeInputSchema.safeParse(await readJson(request));
     if (!parsed.success) {
       return NextResponse.json({ error: "Invalid summary payload", details: parsed.error.flatten() }, { status: 400 });
     }
 
-    let profile = await getAppProfile(session.user.id).catch(() => null);
+    const profile = await getAppProfile(session.user.id);
     let workoutText = "";
     let workoutId: string | null = null;
 
     if (parsed.data.sessionId && !isDemoUser(session.user.id) && isDatabaseConfigured) {
       const workout = await db.query.workoutSessions.findFirst({
-        where: eq(workoutSessions.id, parsed.data.sessionId),
+        where: and(eq(workoutSessions.id, parsed.data.sessionId),eq(workoutSessions.userId,session.user.id)),
       });
-      if (workout && workout.userId === session.user.id) {
+      if (!workout) throw new ApiError(404,"SESSION_NOT_FOUND","Session not found");
+      if (workout) {
         workoutId = workout.id;
         workoutText = `Type: ${workout.type}
 Exercise: ${workout.exerciseType ?? "mixed"}
@@ -65,6 +67,7 @@ Top strengths: ${(parsed.data.topStrengths ?? []).join("; ") || "none"}`;
     }
 
     const summary = await generateSessionSummary({
+      signal: request.signal,
       profile,
       sessionSummary: workoutText,
       exerciseType: parsed.data.exerciseType,
@@ -80,12 +83,11 @@ Top strengths: ${(parsed.data.topStrengths ?? []).join("; ") || "none"}`;
           summary: summary.summary,
           summaryPayload: toJson(summary),
         })
-        .where(eq(workoutSessions.id, workoutId));
+        .where(and(eq(workoutSessions.id, workoutId),eq(workoutSessions.userId,session.user.id)));
     }
 
     return NextResponse.json(summary);
   } catch (error) {
-    const status = error instanceof Error && error.message === "UNAUTHORIZED" ? 401 : 500;
-    return NextResponse.json({ error: status === 401 ? "Unauthorized" : "Failed to generate summary" }, { status });
+    return apiError(error, request);
   }
 }

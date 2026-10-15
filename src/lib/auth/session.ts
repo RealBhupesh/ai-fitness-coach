@@ -1,145 +1,82 @@
 import { getSessionCookie } from "better-auth/cookies";
-import { currentUser } from "@clerk/nextjs/server";
-import { eq } from "drizzle-orm";
+import { auth as clerkAuth, currentUser } from "@clerk/nextjs/server";
+import { and, eq, sql } from "drizzle-orm";
+import { nanoid } from "nanoid";
 import { headers } from "next/headers";
-import { NextRequest } from "next/server";
 import { db, isDatabaseConfigured } from "@/db";
-import { users } from "@/db/schema";
+import { accountDeletionJobs, providerIdentities, users } from "@/db/schema";
 import { auth } from "@/lib/auth/config";
-import { isClerkAuthEnabled } from "@/lib/env";
+import { assertProductionEnvironment, isClerkAuthEnabled, isDemoModeEnabled, isLegacyAuthEnabled } from "@/lib/env";
 import { hasDemoCookie, buildDemoServerSession } from "@/lib/dummy-auth";
+import { ApiError } from "@/lib/server/api";
 
-type RequestLike = NextRequest | Request | Headers | undefined;
+type RequestLike = Request | Headers | undefined;
+export type AppSession = { session: { id?: string; userId: string; expiresAt: Date | string }; user: { id: string; email: string; name: string; image?: string | null; emailVerified?: boolean | null } };
+const toHeaders = (source?: RequestLike) => source instanceof Headers ? source : source ? source.headers : new Headers();
 
-function toHeaders(source?: RequestLike): Headers {
-  if (!source) {
-    return new Headers();
+async function getClerkServerSession(requestHeaders: Headers): Promise<AppSession | null> {
+  if (!isClerkAuthEnabled()) return null;
+  const verified = await clerkAuth();
+  if (!verified.userId) return null;
+  if (!isDatabaseConfigured) throw new Error("DATABASE_UNAVAILABLE");
+  const deleted = await db.query.accountDeletionJobs.findFirst({ where: and(eq(accountDeletionJobs.provider, "clerk"), eq(accountDeletionJobs.subject, verified.userId)) });
+  if (deleted) throw new ApiError(403, "ACCOUNT_DELETION_PENDING", "This account has been deleted or is awaiting cleanup");
+  const mapping = await db.query.providerIdentities.findFirst({ where: and(eq(providerIdentities.provider, "clerk"), eq(providerIdentities.subject, verified.userId)) });
+  let user = mapping ? await db.query.users.findFirst({ where: eq(users.id, mapping.userId) }) : undefined;
+  if (!user) {
+    // Keep the proved legacy account active until an explicit link is completed,
+    // including when the user changed their email in the new provider.
+    if (isLegacyAuthEnabled() && getSessionCookie(requestHeaders)) {
+      const legacy = await auth.api.getSession({ headers: requestHeaders });
+      if (legacy?.user?.id) return legacy;
+    }
+    const clerkUser = await currentUser();
+    const email = clerkUser?.primaryEmailAddress;
+    if (!email || email.verification?.status !== "verified") throw new ApiError(403, "EMAIL_VERIFICATION_REQUIRED", "Verify your primary email before joining the beta");
+    const emailAddress = email.emailAddress.toLowerCase();
+    user = await db.transaction(async tx => {
+      await tx.execute(sql`select pg_advisory_xact_lock(87239401)`);
+      if (await tx.query.accountDeletionJobs.findFirst({ where: and(eq(accountDeletionJobs.provider, "clerk"), eq(accountDeletionJobs.subject, verified.userId!)) })) throw new ApiError(403, "ACCOUNT_DELETION_PENDING", "Account cleanup is pending");
+      const existingMapping = await tx.query.providerIdentities.findFirst({ where: and(eq(providerIdentities.provider, "clerk"), eq(providerIdentities.subject, verified.userId!)) });
+      if (existingMapping) return (await tx.query.users.findFirst({ where: eq(users.id, existingMapping.userId) }))!;
+      const existingEmail = await tx.query.users.findFirst({ where: sql`lower(${users.email}) = ${emailAddress}` });
+      if (existingEmail) throw new ApiError(409, "IDENTITY_LINK_REQUIRED", "An existing account uses this email. Sign in to both accounts to link them in Settings.");
+      if (process.env.NODE_ENV === "production" && process.env.BETA_SIGNUPS_OPEN !== "true") throw new ApiError(503, "BETA_CLOSED", "Beta registration is not open yet.");
+      const [{ count }] = await tx.select({ count: sql<number>`count(*)::int` }).from(users);
+      const capacity = Number(process.env.BETA_ACCOUNT_LIMIT || 50);
+      if (!Number.isInteger(capacity) || capacity < 1 || count >= capacity) throw new ApiError(503, "BETA_FULL", "The beta is full. Please check back later.");
+      const [created] = await tx.insert(users).values({ id: nanoid(), email: emailAddress, name: clerkUser!.fullName || clerkUser!.username || "Athlete", image: clerkUser!.imageUrl, emailVerified: true }).returning();
+      await tx.insert(providerIdentities).values({ id: nanoid(), userId: created.id, provider: "clerk", subject: verified.userId! });
+      return created;
+    });
   }
-  if (source instanceof Headers) {
-    return source;
-  }
-  if ("headers" in source) {
-    return new Headers(source.headers);
-  }
-  return new Headers();
+  return { user, session: { id: verified.sessionId ?? undefined, userId: user.id, expiresAt: new Date((verified.sessionClaims?.exp ?? 0) * 1000) } };
 }
 
-async function getClerkServerSession() {
-  if (!isClerkAuthEnabled()) {
-    return null;
-  }
-
-  try {
-    const user = await currentUser();
-    if (!user?.id) return null;
-
-    const email = user.primaryEmailAddress?.emailAddress ?? user.emailAddresses[0]?.emailAddress;
-    if (!email) return null;
-
-    const name = user.fullName || user.username || email.split("@")[0] || "FitCoach user";
-    const image = user.imageUrl || null;
-    const now = new Date();
-
-    if (!isDatabaseConfigured) {
-      const id = `clerk:${user.id}`;
-      return {
-        session: {
-          id,
-          userId: id,
-          expiresAt: new Date(now.getTime() + 60 * 60 * 24 * 7 * 1000),
-        },
-        user: {
-          id,
-          email,
-          name,
-          image,
-          emailVerified: Boolean(user.primaryEmailAddress?.verification?.status === "verified"),
-          createdAt: now,
-          updatedAt: now,
-        },
-      };
-    }
-
-    const existingByEmail = await db.query.users.findFirst({ where: eq(users.email, email) });
-
-    if (existingByEmail) {
-      await db
-        .update(users)
-        .set({
-          name,
-          image,
-          emailVerified: Boolean(user.primaryEmailAddress?.verification?.status === "verified"),
-          updatedAt: now,
-        })
-        .where(eq(users.id, existingByEmail.id));
-
-      return {
-        session: {
-          id: `clerk:${user.id}`,
-          userId: existingByEmail.id,
-          expiresAt: new Date(now.getTime() + 60 * 60 * 24 * 7 * 1000),
-        },
-        user: {
-          ...existingByEmail,
-          name,
-          image,
-          emailVerified: Boolean(user.primaryEmailAddress?.verification?.status === "verified"),
-        },
-      };
-    }
-
-    const id = `clerk:${user.id}`;
-    const newUser = {
-      id,
-      email,
-      name,
-      image,
-      emailVerified: Boolean(user.primaryEmailAddress?.verification?.status === "verified"),
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    await db.insert(users).values(newUser).onConflictDoNothing();
-
-    return {
-      session: {
-        id,
-        userId: id,
-        expiresAt: new Date(now.getTime() + 60 * 60 * 24 * 7 * 1000),
-      },
-      user: newUser,
-    };
-  } catch {
-    return null;
-  }
-}
-
-export async function getServerSession(source?: RequestLike) {
+export async function getServerSession(source?: RequestLike): Promise<AppSession | null> {
+  assertProductionEnvironment();
   const requestHeaders = source ? toHeaders(source) : new Headers(await headers());
-  const cookieHeader = requestHeaders.get("cookie") || "";
-
-  if (hasDemoCookie(cookieHeader)) {
-    return buildDemoServerSession() as any;
+  if (isDemoModeEnabled() && hasDemoCookie(requestHeaders.get("cookie") || "")) return buildDemoServerSession();
+  try {
+    const clerkSession = await getClerkServerSession(requestHeaders);
+    if (clerkSession) return clerkSession;
+  } catch (error) {
+    // Ownership is proved by the legacy session; linking still requires both sessions.
+    if (!(error instanceof ApiError) || error.code !== "IDENTITY_LINK_REQUIRED" || !isLegacyAuthEnabled()) throw error;
+    const legacy = await auth.api.getSession({ headers: requestHeaders });
+    if (legacy?.user?.id) return legacy;
+    throw error;
   }
-
-  const clerkSession = await getClerkServerSession();
-  if (clerkSession?.user?.id) return clerkSession;
-
-  if (isDatabaseConfigured) {
-    try {
-      const session = await auth.api.getSession({ headers: requestHeaders });
-      if (session?.user?.id) return session;
-    } catch {}
+  if (isLegacyAuthEnabled() && isDatabaseConfigured) {
+    const session = await auth.api.getSession({ headers: requestHeaders });
+    if (session?.user?.id) return session;
   }
-
   return null;
 }
 
 export async function requireServerSession(source?: RequestLike) {
   const session = await getServerSession(source);
-  if (!session?.user?.id) {
-    throw new Error("UNAUTHORIZED");
-  }
+  if (!session) throw new Error("UNAUTHORIZED");
   return session;
 }
 

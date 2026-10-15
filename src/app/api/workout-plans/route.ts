@@ -1,3 +1,4 @@
+import { apiError, readJson } from "@/lib/server/api";
 import { and, desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { NextResponse } from "next/server";
@@ -23,17 +24,17 @@ export async function GET(request: Request) {
     });
 
     return NextResponse.json({ plans });
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return apiError(error, request);
   }
 }
 
 export async function POST(request: Request) {
   try {
     const session = await requireServerSession(request);
-    const guard = guardMutationRequest(request, {
+    const guard = await guardMutationRequest(request, {
       bucket: "workout-plans",
-      key: `${session.user.id}:${getRequestIp(request)}`,
+      key: session.user.id,
       limit: 12,
       windowMs: 60_000,
     });
@@ -41,7 +42,7 @@ export async function POST(request: Request) {
       return guard;
     }
 
-    const parsed = workoutPlanCreateSchema.safeParse(await request.json());
+    const parsed = workoutPlanCreateSchema.safeParse(await readJson(request));
     if (!parsed.success) {
       return NextResponse.json({ error: "Invalid plan payload", details: parsed.error.flatten() }, { status: 400 });
     }
@@ -88,7 +89,7 @@ export async function POST(request: Request) {
 
     await db.insert(workoutPlans).values(record);
     return NextResponse.json({ plan: record });
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return apiError(error, request);
   }
 }

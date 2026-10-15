@@ -10,12 +10,12 @@ function expandLocalDevOrigins(values: string[]) {
     "http://127.0.0.1:3002",
   ];
 
-  const hasLocalhostOrigin = values.some((value) => /localhost|127\.0\.0\.1/i.test(value));
+  const hasLocalhostOrigin = process.env.NODE_ENV !== "production" && values.some((value) => /localhost|127\.0\.0\.1/i.test(value));
   return hasLocalhostOrigin ? [...values, ...localDevOrigins] : values;
 }
 
 export function getAppBaseUrl() {
-  return process.env.BETTER_AUTH_URL || process.env.NEXT_PUBLIC_APP_URL || DEFAULT_APP_URL;
+  return process.env.NEXT_PUBLIC_APP_URL || process.env.BETTER_AUTH_URL || DEFAULT_APP_URL;
 }
 
 export function getTrustedOrigins() {
@@ -42,10 +42,15 @@ function flagDisabled(value: string | undefined) {
 }
 
 export function isDemoModeEnabled() {
-  const explicit = process.env.NEXT_PUBLIC_ENABLE_DEMO_MODE ?? process.env.ENABLE_DEMO_MODE;
+  if (process.env.NODE_ENV === "production") return false;
+  const explicit = process.env.ENABLE_DEMO_MODE ?? process.env.NEXT_PUBLIC_ENABLE_DEMO_MODE;
   if (flagEnabled(explicit)) return true;
   if (flagDisabled(explicit)) return false;
-  return true;
+  return false;
+}
+
+export function isLegacyAuthEnabled() {
+  return process.env.NODE_ENV !== "production" || (flagEnabled(process.env.ENABLE_LEGACY_AUTH) && flagEnabled(process.env.AUTH_MIGRATION_INVENTORIED));
 }
 
 export function isClerkAuthEnabled() {
@@ -56,11 +61,29 @@ export function validateServerEnv() {
   const missing: string[] = [];
   const invalid: string[] = [];
   const warnings: string[] = [];
+  if (process.env.NODE_ENV === "production") {
+    for (const key of ["DATABASE_URL", "NEXT_PUBLIC_APP_URL", "TRUSTED_ORIGINS", "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "CLERK_SECRET_KEY", "UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN", "CRON_SECRET"]) {
+      if (!process.env[key]?.trim()) missing.push(key);
+    }
+    if (!flagEnabled(process.env.AUTH_MIGRATION_INVENTORIED)) invalid.push("AUTH_MIGRATION_INVENTORIED");
+    if (flagEnabled(process.env.ENABLE_DEMO_MODE) || flagEnabled(process.env.NEXT_PUBLIC_ENABLE_DEMO_MODE)) invalid.push("ENABLE_DEMO_MODE");
+    if (flagEnabled(process.env.ENABLE_LEGACY_AUTH) && !process.env.BETTER_AUTH_SECRET) missing.push("BETTER_AUTH_SECRET");
+    for (const key of ["NEXT_PUBLIC_APP_URL", "UPSTASH_REDIS_REST_URL"]) {
+      if (!process.env[key]) continue;
+      try { if (new URL(process.env[key]!).protocol !== "https:") invalid.push(key); } catch { invalid.push(key); }
+    }
+    for (const value of process.env.TRUSTED_ORIGINS?.split(",") ?? []) {
+      try { const url = new URL(value.trim()); if (url.protocol !== "https:" || url.origin !== value.trim()) invalid.push("TRUSTED_ORIGINS"); } catch { invalid.push("TRUSTED_ORIGINS"); }
+    }
+    if (process.env.CRON_SECRET && process.env.CRON_SECRET.length < 32) invalid.push("CRON_SECRET");
+  }
+  if (process.env.DATABASE_URL && !/^postgres(?:ql)?:\/\//.test(process.env.DATABASE_URL)) invalid.push("DATABASE_URL");
 
   if (
     process.env.NODE_ENV === "production" &&
     process.env.BETTER_AUTH_SECRET &&
-    (process.env.BETTER_AUTH_SECRET === "your-secret-key-change-in-production" ||
+    (/^(?:replace-with-|your-secret-|fitcoach-demo-only-|playwright-|ci-local-|local-validation-)/.test(process.env.BETTER_AUTH_SECRET) ||
+      process.env.BETTER_AUTH_SECRET === "your-secret-key-change-in-production" ||
       process.env.BETTER_AUTH_SECRET === "replace-with-a-long-random-secret" ||
       process.env.BETTER_AUTH_SECRET.length < 32)
   ) {
@@ -68,7 +91,7 @@ export function validateServerEnv() {
   }
 
   if (!process.env.BETTER_AUTH_SECRET) {
-    warnings.push("Better Auth secret not set; demo fallback secret will be used");
+    warnings.push("Legacy Better Auth secret not set");
   }
 
   if (process.env.GOOGLE_CLIENT_ID && !process.env.GOOGLE_CLIENT_SECRET) {
@@ -99,6 +122,10 @@ export function validateServerEnv() {
     invalid,
     warnings,
   };
+}
+
+export function assertProductionEnvironment() {
+  if (process.env.NODE_ENV === "production" && !validateServerEnv().ok) throw new Error("SERVICE_NOT_CONFIGURED");
 }
 
 export function describeServerEnvState(state = validateServerEnv()) {

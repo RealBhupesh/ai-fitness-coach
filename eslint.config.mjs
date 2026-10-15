@@ -5,11 +5,19 @@ const eslintConfig = [
     ignores: [
       '.next/**',
       'node_modules/**',
+      'test-results/**',
+      'playwright-report/**',
+      'reports/**',
+      'backups/**',
+      'datasets/**',
       'public/mediapipe/wasm/**',
+      'public/mediapipe/pose-worker.js',
     ],
   },
   ...nextVitals,
   {
+    // TypeScript and the production build validate dependency exports.
+    settings: { 'import/ignore': ['node_modules'] },
     rules: {
       'react/no-unescaped-entities': 'off',
       '@next/next/no-img-element': 'off',
@@ -28,7 +36,7 @@ const eslintConfig = [
       'import/no-absolute-path': 'error',
       'import/no-dynamic-require': 'error',
       'import/no-self-import': 'error',
-      'import/no-cycle': 'error',
+      'import/no-cycle': ['error', { ignoreExternal: true }],
       'import/no-useless-path-segments': 'error',
     },
   },

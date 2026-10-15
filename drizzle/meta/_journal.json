@@ -36,6 +36,13 @@
       "when": 1782727200000,
       "tag": "0004_dance_course_progress",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791889070470,
+      "tag": "0005_production_beta",
+      "breakpoints": true
     }
   ]
 }

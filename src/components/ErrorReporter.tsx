@@ -14,10 +14,11 @@ export default function ErrorReporter({ error, reset }: ReporterProps) {
   const pollRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
   useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
     const inIframe = window.parent !== window;
     if (!inIframe) return;
 
-    const send = (payload: unknown) => window.parent.postMessage(payload, "*");
+    const send = (payload: unknown) => window.parent.postMessage(payload, window.location.origin);
 
     const onError = (e: ErrorEvent) =>
       send({
@@ -104,7 +105,7 @@ export default function ErrorReporter({ error, reset }: ReporterProps) {
               Something went wrong!
             </h1>
             <p className="text-muted-foreground">
-              An unexpected error occurred. Please try again fixing with Orchids
+              An unexpected error occurred. Please reload the page or try again later
             </p>
           </div>
           <div className="space-y-2">

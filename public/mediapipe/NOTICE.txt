@@ -1,0 +1,4 @@
+The generated pose-worker.js bundles @mediapipe/tasks-vision by The MediaPipe Authors.
+MediaPipe Tasks Vision is licensed under the Apache License, Version 2.0.
+See LICENSE-2.0.txt and https://github.com/google-ai-edge/mediapipe.
+The worker is generated from src/lib/pose/tracking.worker.ts by scripts/build-pose-worker.mjs.

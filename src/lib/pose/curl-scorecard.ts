@@ -99,7 +99,7 @@ function landmarkVisibility(landmark?: Landmark) {
 }
 
 export function buildCurlBaseline(frames: TrackingFrame[]): CurlBaseline {
-  const usable = frames.filter((frame) => frame.smoothedLandmarks.length && frame.frameQuality === "ready").slice(-24);
+  const usable = frames.filter((frame) => (frame.analysisLandmarks ?? frame.smoothedLandmarks).length && frame.frameQuality === "ready").slice(-24);
   if (usable.length < 10) {
     return {
       ready: false,
@@ -112,16 +112,16 @@ export function buildCurlBaseline(frames: TrackingFrame[]): CurlBaseline {
     };
   }
 
-  const shoulderSpans = usable.map((frame) => distance(frame.smoothedLandmarks[11], frame.smoothedLandmarks[12]));
+  const shoulderSpans = usable.map((frame) => distance((frame.analysisLandmarks ?? frame.smoothedLandmarks)[11], (frame.analysisLandmarks ?? frame.smoothedLandmarks)[12]));
   const torsoLengths = usable.map((frame) =>
     average([
-      distance(frame.smoothedLandmarks[11], frame.smoothedLandmarks[23]),
-      distance(frame.smoothedLandmarks[12], frame.smoothedLandmarks[24]),
+      distance((frame.analysisLandmarks ?? frame.smoothedLandmarks)[11], (frame.analysisLandmarks ?? frame.smoothedLandmarks)[23]),
+      distance((frame.analysisLandmarks ?? frame.smoothedLandmarks)[12], (frame.analysisLandmarks ?? frame.smoothedLandmarks)[24]),
     ]),
   );
   const armVisibility = average(
     usable.map((frame) =>
-      average([11, 12, 13, 14, 15, 16, 23, 24].map((index) => landmarkVisibility(frame.smoothedLandmarks[index]))),
+      average([11, 12, 13, 14, 15, 16, 23, 24].map((index) => landmarkVisibility((frame.analysisLandmarks ?? frame.smoothedLandmarks)[index]))),
     ),
   );
   const confidence = average(usable.map((frame) => frame.trackingConfidence));

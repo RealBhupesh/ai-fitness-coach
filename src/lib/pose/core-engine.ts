@@ -239,7 +239,7 @@ function buildAiGuidance(options: {
   const context = [
     options.calibration.ready ? "calibrated to this athlete" : "calibration still warming up",
     options.trend.direction === "improving" ? "current rep improved; reinforce the change" : "",
-    mlPrediction ? `ML quality ${mlPrediction.predictedQuality}/100 with confidence ${mlPrediction.modelConfidence}` : "ML posture prediction suppressed or unavailable",
+    mlPrediction ? `${mlPrediction.source} indicator score ${mlPrediction.predictedQuality}/100; evaluation ${mlPrediction.evaluationStatus}` : "ML posture prediction suppressed or unavailable",
     options.trend.repeatedIssue ? "repeated measured issue; not a generic cue" : "single-frame cue; stay measured",
     options.priority.reason,
   ]
@@ -273,7 +273,7 @@ function buildAiGuidance(options: {
 
 function buildCalibration(samples: TrackingFrame[]): AthleteCalibration {
   if (!samples.length) return emptyCalibration();
-  const landmarks = samples.map((frame) => frame.smoothedLandmarks);
+  const landmarks = samples.map((frame) => (frame.analysisLandmarks ?? frame.smoothedLandmarks));
   const shoulderSpan = average(landmarks.map((points) => distance(points[11], points[12])));
   const hipSpan = average(landmarks.map((points) => distance(points[23], points[24])));
   const torsoLength = average(
@@ -507,14 +507,20 @@ export function createPoseCoreEngine(options: PoseCoreEngineOptions) {
   let currentRepStartedAt: number | null = null;
   let calibrationFrames: TrackingFrame[] = [];
   let repMemory: RepMemory[] = [];
-  let landmarkWindow: Landmark[][] = [];
+  let landmarkWindow: { timestampMs: number; landmarks: Landmark[] }[] = [];
+  let lastFrameTimestamp: number | null = null;
 
   return {
     processFrame(frame: TrackingFrame): PoseCoreFrameResult {
+      if (lastFrameTimestamp !== null && (frame.timestampMs <= lastFrameTimestamp || frame.timestampMs - lastFrameTimestamp > 1000)) {
+        phaseState = createPhaseTrackerState(frame.timestampMs); currentRepFrames = []; currentRepStartedAt = null; calibrationFrames = []; landmarkWindow = [];
+      }
+      lastFrameTimestamp = frame.timestampMs;
       const calibration = buildCalibration(calibrationFrames);
       const trend = buildTrend(repMemory);
       const pauseReason = requiredTrackingReady(options.exerciseId, frame);
       if (pauseReason) {
+        phaseState = createPhaseTrackerState(frame.timestampMs); currentRepFrames = []; currentRepStartedAt = null; landmarkWindow = []; calibrationFrames = [];
         const priority = buildPriority({ correction: pauseReason, trend });
         const aiGuidance =
           guidanceMode === "ai"
@@ -544,7 +550,7 @@ export function createPoseCoreEngine(options: PoseCoreEngineOptions) {
       }
 
       calibrationFrames = [...calibrationFrames, frame].slice(-18);
-      landmarkWindow = [...landmarkWindow, frame.smoothedLandmarks].slice(-18);
+      landmarkWindow = [...landmarkWindow.filter(item => frame.timestampMs - item.timestampMs <= 1000), { timestampMs: frame.timestampMs, landmarks: (frame.analysisLandmarks ?? frame.smoothedLandmarks) }];
       const activeCalibration = buildCalibration(calibrationFrames);
 
       const phaseUpdate = advancePhaseTracker(options.exerciseId, frame, phaseState, frame.timestampMs);
@@ -555,7 +561,7 @@ export function createPoseCoreEngine(options: PoseCoreEngineOptions) {
         ? evaluatePostureMl({
             exerciseId: options.exerciseId,
             phase: phaseUpdate.phase,
-            landmarkWindow,
+            landmarkWindow: landmarkWindow.map(item => item.landmarks),
             confidence: frame.trackingConfidence,
           })
         : undefined;
@@ -623,6 +629,7 @@ export function createPoseCoreEngine(options: PoseCoreEngineOptions) {
       calibrationFrames = [];
       repMemory = [];
       landmarkWindow = [];
+      lastFrameTimestamp = null;
     },
     getRepCount() {
       return repCount;

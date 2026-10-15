@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { safeNextPath } from "@/lib/auth/navigation";
 import { signIn, useSession } from "@/lib/auth/client";
 import { createDemoSession, getDemoSession } from "@/lib/dummy-auth";
 import { isDemoModeEnabled } from "@/lib/env";
@@ -24,11 +25,11 @@ function LoginPageInner() {
 
   useEffect(() => {
     if (!isPending && sessionData?.user?.id) {
-      router.replace(searchParams.get("next") || "/dashboard");
+      router.replace(safeNextPath(searchParams.get("next")));
       return;
     }
     if (!isPending && !sessionData?.user?.id && demoModeEnabled && getDemoSession()) {
-      router.replace(searchParams.get("next") || "/dashboard");
+      router.replace(safeNextPath(searchParams.get("next")));
     }
   }, [demoModeEnabled, isPending, router, searchParams, sessionData?.user?.id]);
 
@@ -48,7 +49,7 @@ function LoginPageInner() {
         return;
       }
 
-      router.push(searchParams.get("next") || "/dashboard");
+      router.push(safeNextPath(searchParams.get("next")));
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to sign in");
@@ -63,7 +64,7 @@ function LoginPageInner() {
     try {
       const result = await signIn.social({
         provider: "google",
-        callbackURL: searchParams.get("next") || "/dashboard",
+        callbackURL: safeNextPath(searchParams.get("next")),
       });
 
       if ((result as any)?.error) {
@@ -150,7 +151,7 @@ function LoginPageInner() {
                 className="mt-3 w-full"
                 onClick={() => {
                   createDemoSession();
-                  router.push(searchParams.get("next") || "/dashboard");
+                  router.push(safeNextPath(searchParams.get("next")));
                   router.refresh();
                 }}
               >

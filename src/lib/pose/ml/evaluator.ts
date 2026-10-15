@@ -24,16 +24,13 @@ const MISTAKE_CLASSES: PostureMistakeClass[] = [
 ];
 
 export const DEFAULT_POSTURE_MODEL_METADATA: PostureModelMetadata = {
-  version: "research-grade-seed-v0",
-  name: "Interpretable public-dataset seed posture model",
+  version: "heuristic-rules-v2",
+  name: "Handwritten posture indicators (not a trained model)",
   modelType: "interpretable_threshold_model",
-  trainedOn: [
-    "MediaPipe 33-landmark public fitness datasets",
-    "KIMORE reviewed as clinical-style movement-assessment reference, not direct webcam training data",
-  ],
+  trainedOn: [],
   clinicalClaim: "not_medical_device",
   limitations: [
-    "Seed model uses interpretable thresholds until a project-specific public-dataset artifact is exported.",
+    "Handwritten thresholds have not been fitted to a training dataset.",
     "Laptop-webcam validation is required before stronger real-world accuracy claims.",
     "Outputs are AI coach guidance and must not be used as diagnosis or treatment advice.",
   ],
@@ -134,7 +131,13 @@ function predictionFromProbabilities(probabilities: Record<PostureMistakeClass, 
   return {
     predictedQuality,
     mistakeProbabilities: probabilities,
-    modelConfidence,
+    modelConfidence: 0,
+    calibratedConfidence: null,
+    source: "heuristic",
+    evaluationStatus: "heuristic",
+    featureVersion: "isotropic-geometry-v2",
+    supportedFaults: ["squat_depth", "knee_collapse", "hip_shift", "curl_elbow_drift", "curl_shoulder_hike", "curl_incomplete_rom"],
+    suppressionReason: suppressed ? "Insufficient visible joints" : undefined,
     modelVersion: DEFAULT_POSTURE_MODEL_METADATA.version,
     clinicalClaim: "not_medical_device",
     suppressed,
@@ -155,21 +158,21 @@ export function evaluatePostureMl(input: PostureMlInput): PostureMlPrediction {
 
   if (input.exerciseId === "squat") {
     const kneeCollapse = clamp((0.62 - features.kneeWidthRatio) / 0.45, 0, 1);
-    const shallowDepth = clamp((features.avgKneeAngle - 118) / 34, 0, 1);
+    const shallowDepth = ["bottom", "rising", "concentric"].includes(input.phase) ? clamp((features.avgKneeAngle - 118) / 34, 0, 1) : 0;
     const overDepth = clamp((78 - features.avgKneeAngle) / 22, 0, 1);
     const symmetry = clamp(features.kneeSymmetryGap / 28, 0, 1);
     probabilities.knee_collapse = Number(kneeCollapse.toFixed(2));
-    probabilities.squat_depth = Number(Math.max(shallowDepth, overDepth).toFixed(2));
+    probabilities.squat_depth = Number(shallowDepth.toFixed(2));
     probabilities.hip_shift = Number(symmetry.toFixed(2));
-    probabilities.torso_fold = 0.12;
+    probabilities.torso_fold = 0;
   } else {
     const elbowDrift = clamp((features.elbowDriftRatio - 0.38) / 0.64, 0, 1);
     const shoulderHike = clamp((features.shoulderHikeRatio - 0.16) / 0.44, 0, 1);
     const wristFold = clamp((features.wristFoldRatio - 0.72) / 0.8, 0, 1);
-    const incompleteRom = clamp(Math.min(Math.abs(features.avgElbowAngle - 56), Math.abs(features.avgElbowAngle - 164)) / 80, 0, 1);
+    const incompleteRom = ["top", "bottom"].includes(input.phase) ? clamp(Math.min(Math.abs(features.avgElbowAngle - 56), Math.abs(features.avgElbowAngle - 164)) / 80, 0, 1) : 0;
     probabilities.curl_elbow_drift = Number(elbowDrift.toFixed(2));
     probabilities.curl_shoulder_hike = Number(shoulderHike.toFixed(2));
-    probabilities.curl_wrist_fold = Number(wristFold.toFixed(2));
+    probabilities.curl_wrist_fold = 0;
     probabilities.curl_incomplete_rom = Number(incompleteRom.toFixed(2));
   }
 

@@ -1,207 +1,93 @@
-import { FilesetResolver, PoseLandmarker } from "@mediapipe/tasks-vision";
 import { buildTrackingFrame, estimateMotion } from "@/lib/pose/confidence";
 import type { ExerciseId, Landmark, SessionTelemetryEvent, TrackingFrame } from "@/lib/pose/types";
-
-type CameraFrame = {
-  video: HTMLVideoElement;
-  timestampMs: number;
-  frameIndex: number;
-  fps: number;
-};
-
-type PoseModelQuality = "full" | "lite";
-
-function getWasmRoot() {
-  return "/mediapipe/wasm";
-}
-
-function getModelAssetPath(quality: PoseModelQuality) {
-  const filename = quality === "full" ? "pose_landmarker_full.task" : "pose_landmarker_lite.task";
-  return `/mediapipe/models/${filename}`;
-}
-
-function normalizePoseEngineError(error: unknown) {
-  const err = error as { message?: string };
-  const message = err?.message || "";
-  if (/fetch|load|network|cdn|wasm|modelAssetPath|storage\.googleapis|jsdelivr/i.test(message)) {
-    return new Error(`Pose model failed to load. ${message}`.trim());
-  }
-  if (/gpu/i.test(message)) {
-    return new Error(`The high-performance pose engine could not start on this device. ${message}`.trim());
-  }
-  return new Error(message ? `Pose engine failed to start. ${message}` : "Pose engine failed to start.");
-}
-
-function mapLandmarks(landmarks: Array<{ x: number; y: number; z?: number; visibility?: number }> | undefined) {
-  return (landmarks ?? []).map((item) => ({
-    x: item.x,
-    y: item.y,
-    z: item.z,
-    visibility: item.visibility ?? 1,
-  })) as Landmark[];
-}
-
-function createBrightnessSampler() {
-  const canvas = typeof document !== "undefined" ? document.createElement("canvas") : null;
-  const ctx = canvas?.getContext("2d", { willReadFrequently: true }) ?? null;
-  let lastBrightness = 80;
-
-  return {
-    sample(video: HTMLVideoElement, frameIndex: number) {
-      if (!canvas || !ctx || frameIndex % 12 !== 0) {
-        return lastBrightness;
-      }
-
-      canvas.width = 32;
-      canvas.height = 18;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-      let total = 0;
-      for (let index = 0; index < pixels.length; index += 4) {
-        total += (pixels[index] + pixels[index + 1] + pixels[index + 2]) / 3;
-      }
-      lastBrightness = Math.round(total / Math.max(pixels.length / 4, 1));
-      return lastBrightness;
-    },
-  };
-}
-
-export function createPoseTrackingEngine(options: {
-  onTelemetry?: (event: SessionTelemetryEvent) => void;
-}) {
-  let landmarker: PoseLandmarker | null = null;
+import type { PoseWorkerReply, PoseWorkerRequest } from "@/lib/pose/tracking.worker";
+type CameraFrame = { video: HTMLVideoElement; timestampMs: number; frameIndex: number; fps: number; width?: number; height?: number };
+export function createPoseTrackingEngine(options: { onTelemetry?: (event: SessionTelemetryEvent) => void; onPerformance?: (latencyMs: number) => void }) {
+  let worker: Worker | null = null;
+  let initialized: Promise<void> | null = null;
+  let pending: { id: number; resolve: (reply: PoseWorkerReply) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> } | null = null;
+  let id = 0;
+  let generation = 0;
+  let processing = false;
   let previousSmoothed: Landmark[] | null = null;
   let previousRaw: Landmark[] | null = null;
-  let modelQuality: PoseModelQuality = "full";
-  let reloading = false;
-  let lowFpsFrames = 0;
-  let visionResolverPromise: ReturnType<typeof FilesetResolver.forVisionTasks> | null = null;
-  const brightnessSampler = createBrightnessSampler();
-
-  const emitTelemetry = (event: SessionTelemetryEvent) => {
-    options.onTelemetry?.(event);
-  };
-
-  const load = async (quality: PoseModelQuality) => {
-    try {
-      visionResolverPromise ??= FilesetResolver.forVisionTasks(getWasmRoot());
-      const vision = await visionResolverPromise;
-      let next: PoseLandmarker | null = null;
-      let lastError: unknown = null;
-
-      for (const delegate of ["GPU", "CPU"] as const) {
+  let previousTimestamp = 0;
+  let quality: "full" | "lite" = "full";
+  let slowFrames = 0;
+  function request(message: Omit<PoseWorkerRequest, "id">, transfer: Transferable[] = []): Promise<PoseWorkerReply> {
+    if (!worker || pending) return Promise.reject(new Error("Pose worker unavailable"));
+    const requestId = ++id;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { pending = null; worker?.terminate(); worker = null; initialized = null; reject(new Error("Pose model timed out. Restart the camera to retry.")); }, message.type === "init" ? 30000 : 5000);
+      pending = { id: requestId, resolve, reject, timer };
+      try { worker!.postMessage({ ...message, id: requestId }, transfer); }
+      catch { clearTimeout(timer); pending = null; reject(new Error("Unable to send camera frame")); }
+    });
+  }
+  function createWorker() {
+    // Classic worker lets the MediaPipe WASM loader use importScripts.
+    const created = new Worker(new URL("/mediapipe/pose-worker.js", window.location.origin));
+    worker = created;
+    created.onmessage = ({ data }: MessageEvent<PoseWorkerReply>) => {
+      if (worker !== created || !pending || pending.id !== data.id) return;
+      const current = pending; pending = null; clearTimeout(current.timer);
+      if (data.error) current.reject(new Error(data.error)); else current.resolve(data);
+    };
+    created.onerror = () => { if (worker !== created) return; if (pending) { clearTimeout(pending.timer); pending.reject(new Error("Pose worker failed. Restart the camera to retry.")); pending = null; } worker?.terminate(); worker = null; initialized = null; };
+  }
+  const init = () => {
+    if (!initialized) {
+      if (!worker) createWorker();
+      const token = generation;
+      initialized = request({ type: "init", quality, origin: window.location.origin }).then(() => undefined).catch(async error => {
+        if (token !== generation || quality === "lite") { initialized = null; throw error; }
+        quality = "lite";
+        if (!worker) createWorker();
         try {
-          next = await PoseLandmarker.createFromOptions(vision, {
-            baseOptions: {
-              modelAssetPath: getModelAssetPath(quality),
-              delegate,
-            },
-            runningMode: "VIDEO",
-            numPoses: 1,
-            minPoseDetectionConfidence: 0.55,
-            minPosePresenceConfidence: 0.55,
-            minTrackingConfidence: 0.55,
-            outputSegmentationMasks: false,
-          });
-          break;
-        } catch (error) {
-          lastError = error;
-        }
-      }
-
-      if (!next) {
-        throw lastError;
-      }
-
-      landmarker?.close();
-      landmarker = next;
-      modelQuality = quality;
-    } catch (error) {
-      throw normalizePoseEngineError(error);
-    }
-  };
-
-  return {
-    async init() {
-      if (!landmarker) {
-        await load(modelQuality);
-      }
-    },
-    async processFrame(cameraFrame: CameraFrame, exerciseId: ExerciseId): Promise<TrackingFrame | null> {
-      if (!landmarker) {
-        await load(modelQuality);
-      }
-
-      if (!landmarker) return null;
-
-      const result = landmarker.detectForVideo(cameraFrame.video, cameraFrame.timestampMs);
-      const rawLandmarks = mapLandmarks(result.landmarks?.[0]);
-      const worldLandmarks = mapLandmarks(result.worldLandmarks?.[0]);
-
-      if (!rawLandmarks.length) {
-        return null;
-      }
-
-      const brightness = brightnessSampler.sample(cameraFrame.video, cameraFrame.frameIndex);
-      const motion = estimateMotion(previousRaw, rawLandmarks);
-      const trackingFrame = buildTrackingFrame({
-        exerciseId,
-        rawLandmarks,
-        worldLandmarks,
-        previousSmoothed,
-        timestampMs: cameraFrame.timestampMs,
-        frameIndex: cameraFrame.frameIndex,
-        fps: cameraFrame.fps,
-        brightness,
-        motion,
+          await request({ type: "init", quality, origin: window.location.origin });
+          options.onTelemetry?.({ timestampMs: 0, type: "model_quality_downgrade", message: "Using the lighter pose model after the full model could not load.", meta: { from: "full", to: "lite" } });
+        } catch (fallbackError) { initialized = null; throw fallbackError; }
       });
-
-      previousRaw = rawLandmarks;
-      previousSmoothed = trackingFrame.smoothedLandmarks;
-
-      if (cameraFrame.fps < 15) {
-        lowFpsFrames += 1;
-      } else {
-        lowFpsFrames = 0;
-      }
-
-      if (lowFpsFrames >= 45 && modelQuality === "full" && !reloading) {
-        reloading = true;
-        emitTelemetry({
-          timestampMs: cameraFrame.timestampMs,
-          type: "model_quality_downgrade",
-          message: "Pose model downgraded to lite after sustained low FPS.",
-          meta: {
-            fps: cameraFrame.fps,
-            from: "full",
-            to: "lite",
-          },
-        });
-        try {
-          await load("lite");
-        } finally {
-          lowFpsFrames = 0;
-          reloading = false;
+    }
+    return initialized;
+  };
+  const reset = () => { generation++; previousRaw = null; previousSmoothed = null; previousTimestamp = 0; slowFrames = 0; };
+  return {
+    init,
+    async processFrame(frame: CameraFrame, exerciseId: ExerciseId): Promise<TrackingFrame | null> {
+      if (processing) return null;
+      processing = true;
+      const token = generation;
+      let bitmap: ImageBitmap | null = null;
+      try {
+        await init();
+        if (token !== generation) return null;
+        bitmap = await createImageBitmap(frame.video);
+        if (token !== generation) return null;
+        const imageAspectRatio = (bitmap.width || frame.video.videoWidth || frame.width || 1) / (bitmap.height || frame.video.videoHeight || frame.height || 1);
+        const reply = await request({ type: "frame", bitmap, timestampMs: frame.timestampMs }, [bitmap]);
+        bitmap = null;
+        if (token !== generation) return null;
+        options.onPerformance?.(reply.latencyMs ?? 0);
+        const raw = reply.landmarks ?? [];
+        if (raw.length !== 33 || raw.some(point=>!Number.isFinite(point.x)||!Number.isFinite(point.y)||(point.z!==undefined&&!Number.isFinite(point.z)))) { reset(); return null; }
+        if (previousTimestamp && (frame.timestampMs <= previousTimestamp || frame.timestampMs - previousTimestamp > 1000)) { previousRaw = null; previousSmoothed = null; }
+        const tracked = buildTrackingFrame({ exerciseId, rawLandmarks: raw, worldLandmarks: reply.worldLandmarks ?? [], imageAspectRatio, previousSmoothed, timestampMs: frame.timestampMs, frameIndex: frame.frameIndex, fps: frame.fps, brightness: reply.brightness ?? 80, motion: estimateMotion(previousRaw, raw) });
+        previousRaw = raw; previousSmoothed = tracked.smoothedLandmarks; previousTimestamp = frame.timestampMs;
+        slowFrames = (reply.latencyMs ?? 0) > 65 ? slowFrames + 1 : 0;
+        if (slowFrames >= 30 && quality === "full") {
+          quality = "lite"; slowFrames = 0;
+          await request({ type: "init", quality, origin: window.location.origin });
+          options.onTelemetry?.({ timestampMs: frame.timestampMs, type: "model_quality_downgrade", message: "Using a lighter pose model to improve responsiveness.", meta: { from: "full", to: "lite" } });
         }
-      }
-
-      return trackingFrame;
+        return tracked;
+      } finally { bitmap?.close(); processing = false; }
     },
-    reset() {
-      previousSmoothed = null;
-      previousRaw = null;
-      lowFpsFrames = 0;
-    },
+    reset,
     async stop() {
-      previousSmoothed = null;
-      previousRaw = null;
-      lowFpsFrames = 0;
-      landmarker?.close();
-      landmarker = null;
-      modelQuality = "full";
-    },
-    getModelQuality() {
-      return modelQuality;
+      reset();
+      if (pending) { clearTimeout(pending.timer); pending.reject(new Error("Pose analysis stopped")); pending = null; }
+      worker?.terminate(); worker = null; initialized = null; quality = "full";
     },
   };
 }

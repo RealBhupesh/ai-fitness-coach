@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/server/api";
 import { and, desc, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { requireServerSession } from "@/lib/auth/session";
@@ -13,7 +14,7 @@ export async function GET(request: Request) {
     }
     const overview = await getNutritionOverview(session.user.id);
     return NextResponse.json(overview);
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return apiError(error, request);
   }
 }

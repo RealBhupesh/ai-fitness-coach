@@ -1,4 +1,5 @@
 "use client";
+import { toast } from "sonner";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -76,10 +77,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
-    const saved = localStorage.getItem("theme") as "light" | "dark" | null;
-    const nextTheme = saved || "dark";
-    setTheme(nextTheme);
-    document.documentElement.classList.toggle("dark", nextTheme === "dark");
+    const sync = () => setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
+    sync();
+    const observer = new MutationObserver(sync);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
@@ -87,7 +89,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     setSidebarCollapsed(collapsed);
   }, []);
 
-  const isPublicRoute = publicRoutes.has(pathname);
+  const isPublicRoute = publicRoutes.has(pathname) || ["/sign-in", "/sign-up", "/sign-out"].some(path => pathname === path || pathname.startsWith(path + "/"));
   const isMinimalRoute = minimalRoutes.has(pathname);
 
   const navTitle = useMemo(() => {
@@ -98,11 +100,13 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     );
   }, [pathname]);
 
-  const toggleTheme = () => {
-    const next = theme === "dark" ? "light" : "dark";
-    setTheme(next);
-    document.documentElement.classList.toggle("dark", next === "dark");
-    localStorage.setItem("theme", next);
+  const toggleTheme = async () => {
+    const next = document.documentElement.classList.contains("dark") ? "light" : "dark";
+    try {
+      const response = await fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ theme: next }) });
+      if (!response.ok) throw new Error("Theme preference could not be saved");
+      document.documentElement.classList.toggle("dark", next === "dark");
+    } catch { toast.error("Theme preference could not be saved. Please retry."); }
   };
 
   const toggleSidebar = () => {
@@ -113,18 +117,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   };
 
   const handleLogout = async () => {
-    clearDemoSession();
-    if (process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
-      router.push("/sign-out");
-      return;
-    }
-    if (!demoMode) {
-      try {
-        await signOut();
-      } catch {}
-    }
-    router.push("/");
-    router.refresh();
+    window.dispatchEvent(new Event("fitcoach:stop-camera"));
+    router.push("/sign-out");
   };
 
   if (isPublicRoute || isMinimalRoute) {

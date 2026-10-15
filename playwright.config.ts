@@ -16,12 +16,14 @@ const webServerEnv = {
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  timeout: 30_000,
+  timeout: 120_000,
+  workers: 1,
+  retries: process.env.CI ? 1 : 0,
   use: {
     baseURL,
     trace: "retain-on-failure",
   },
-  webServer: {
+  webServer: process.env.PLAYWRIGHT_BASE_URL ? undefined : {
     command: useProductionBuild ? `npm run build && npx next start --port ${port}` : `npx next dev --webpack --port ${port}`,
     url: baseURL,
     env: webServerEnv,

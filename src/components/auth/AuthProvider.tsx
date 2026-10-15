@@ -1,10 +1,11 @@
+import { AppSessionProvider } from "@/components/auth/AppSessionProvider";
 import { ClerkProvider } from "@clerk/nextjs";
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
   if (!publishableKey) {
-    return <>{children}</>;
+    return <AppSessionProvider>{children}</AppSessionProvider>;
   }
 
   return (
@@ -13,7 +14,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       signInUrl="/sign-in"
       signUpUrl="/sign-up"
     >
-      {children}
+      <AppSessionProvider>{children}</AppSessionProvider>
     </ClerkProvider>
   );
 }

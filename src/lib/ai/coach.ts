@@ -1,31 +1,13 @@
-import OpenAI from "openai";
+import { getFailoverClient } from "@/lib/ai/transport";
+import { validateWorkoutPlan, validateNutritionPlan } from "@/lib/ai/plan-validation";
+import { ApiError } from "@/lib/server/api";
 import type { AppUserProfile } from "@/lib/app-types";
 import { getAiProviderStatus, resolveAiProviderConfig, sanitizeAiError } from "@/lib/ai/provider";
 import { buildFallbackNutritionPlan, buildFallbackWorkoutPlan } from "@/lib/server/app-data";
 
 type ChatRole = "system" | "user" | "assistant";
 
-const openAiClient = process.env.OPENAI_API_KEY
-  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-  : null;
-
-const groqClient = process.env.GROQ_API_KEY
-  ? new OpenAI({
-      apiKey: process.env.GROQ_API_KEY,
-      baseURL: resolveAiProviderConfig()?.baseURL,
-    })
-  : null;
-
-function getClient() {
-  const config = resolveAiProviderConfig();
-  if (config?.provider === "groq" && groqClient) {
-    return { client: groqClient, model: config.model, provider: "groq" as const };
-  }
-  if (config?.provider === "openai" && openAiClient) {
-    return { client: openAiClient, model: config.model, provider: "openai" as const };
-  }
-  return null;
-}
+const getClient = getFailoverClient;
 
 export { getAiProviderStatus };
 
@@ -41,6 +23,7 @@ function profileContext(profile: AppUserProfile | null | undefined) {
     `Weight: ${profile.weightKg ?? "unknown"} kg`,
     `Target weight: ${profile.targetWeightKg ?? "unknown"} kg`,
     `Dietary preferences: ${profile.dietaryPrefs.join(", ") || "none"}`,
+    `Allergies: ${profile.allergies || "none"}`,
     `Injuries: ${profile.injuries.join(", ") || "none"}`,
     `Pain points: ${profile.painPoints.join(", ") || "none"}`,
     `Equipment: ${profile.equipmentAccess.join(", ") || "none"}`,
@@ -96,14 +79,16 @@ export async function generateCoachMessage({
   sessionSummary,
   sessionContext,
   userMessage,
+  signal,
 }: {
   profile: AppUserProfile | null;
   recentMessages: Array<{ role: ChatRole; content: string }>;
   sessionSummary?: string;
   sessionContext?: string;
   userMessage: string;
+  signal?: AbortSignal;
 }) {
-  const clientInfo = getClient();
+  const clientInfo = getClient(signal);
   const system = `You are FitCoach AI, a personal fitness, dance, and nutrition coach.
 Use the profile and recent training context to provide personalized, practical advice.
 Keep the tone concise, specific, and encouraging. Mention safety and regressions where relevant.
@@ -139,6 +124,7 @@ ${sessionContext || "No saved coaching context yet."}`;
         provider: clientInfo.provider,
       };
     } catch (error) {
+      if (error instanceof ApiError || signal?.aborted) throw error;
       return {
         message: `${fallbackCoachMessage(profile)}\n\nAI provider note: ${clientInfo.provider} did not respond, so I used the local fallback coach.`,
         model: "fallback",
@@ -146,7 +132,7 @@ ${sessionContext || "No saved coaching context yet."}`;
         provider: "fallback" as const,
         attemptedProvider: clientInfo.provider,
         attemptedModel: clientInfo.model,
-        error: sanitizeAiError(error),
+        error: "AI service temporarily unavailable",
       };
     }
   }
@@ -159,9 +145,9 @@ ${sessionContext || "No saved coaching context yet."}`;
   };
 }
 
-export async function generateWorkoutPlan(profile: AppUserProfile | null) {
+async function generateWorkoutPlanWithProvider(profile: AppUserProfile | null, signal?: AbortSignal) {
   const fallback = buildFallbackWorkoutPlan(profile);
-  const clientInfo = getClient();
+  const clientInfo = getClient(signal, completion => validateWorkoutPlan(JSON.parse(completion.choices[0].message.content!), profile));
 
   if (!clientInfo) {
     return {
@@ -272,9 +258,9 @@ ${profileContext(profile)}`;
   };
 }
 
-export async function generateNutritionPlan(profile: AppUserProfile | null) {
+async function generateNutritionPlanWithProvider(profile: AppUserProfile | null, signal?: AbortSignal) {
   const fallback = buildFallbackNutritionPlan(profile);
-  const clientInfo = getClient();
+  const clientInfo = getClient(signal, completion => validateNutritionPlan(JSON.parse(completion.choices[0].message.content!), profile));
 
   if (!clientInfo) {
     return {
@@ -423,8 +409,9 @@ ${profileContext(profile)}`;
   };
 }
 
-export async function generateSessionSummary(input: {
+async function generateSessionSummaryWithProvider(input: {
   profile: AppUserProfile | null;
+  signal?: AbortSignal;
   sessionSummary: string;
   exerciseType?: string;
   coachingLevel?: "easy" | "normal" | "hard";
@@ -453,7 +440,7 @@ export async function generateSessionSummary(input: {
     updatedAt: string;
   };
 }) {
-  const clientInfo = getClient();
+  const clientInfo = getClient(input.signal);
   const isDance = input.exerciseType === "dance_basic" || /dance/i.test(input.sessionSummary);
   const curlEvidenceText = input.curlEvidence
     ? `Curl evidence
@@ -597,97 +584,7 @@ ${curlMemoryText}
 Workout data
 ${input.sessionSummary}`;
 
-  if (!clientInfo) {
-    if (isDance) {
-      return {
-        summary: "Dance phrase completed. The next gains come from cleaner frame control, softer knees, and sharper timing.",
-        keyInsights: ["You stayed with the routine and built phrase consistency.", "Your next step is making each count look cleaner side to side."],
-        nextSessionFocus: [
-          "Practice hitting the frame wide, then relaxing into the groove on the next count.",
-          "Keep both knees soft so the bounce comes from the legs instead of the low back.",
-          "Match both wrists and shoulders before adding more energy.",
-        ],
-        techniqueScorecard: {
-          elbowPath: 72,
-          rangeOfMotion: 70,
-          tempoControl: 68,
-          torsoStability: 74,
-        },
-        topMistakes: [
-          {
-            mistake: "Frame collapses inward on the hit",
-            whyItHurtsPerformance: "Makes the choreography look small and late even if you know the counts.",
-            exactFix: "Reach both wrists wider at shoulder level before you drop into the groove.",
-          },
-          {
-            mistake: "Knees locking between counts",
-            whyItHurtsPerformance: "Removes bounce and sends impact into the joints instead of letting the rhythm travel through the legs.",
-            exactFix: "Keep a small bend in both knees through the whole phrase.",
-          },
-          {
-            mistake: "Torso drifting off-center",
-            whyItHurtsPerformance: "Breaks balance and makes the upper-body line look disconnected from the hips.",
-            exactFix: "Stack ribs over hips and reset center before the next hit.",
-          },
-        ],
-        correctivePlan5Min: [
-          { minuteRange: "0:00-1:30", drill: "Mirror frame hits", focusCue: "Both wrists wide and level." },
-          { minuteRange: "1:30-3:30", drill: "Soft-knee groove pulses", focusCue: "Stay springy, never locked." },
-          { minuteRange: "3:30-5:00", drill: "Four-count hit-and-groove phrase", focusCue: "Hit wide, drop smooth, stay on beat." },
-        ],
-      };
-    }
-
-    return {
-      summary: input.curlEvidence
-        ? `Curl session completed with ${input.curlEvidence.totalReps} reps and an average curl score of ${input.curlEvidence.averageScore}. Best rep: ${
-            input.curlEvidence.bestRep ?? "n/a"
-          }; worst rep: ${input.curlEvidence.worstRep ?? "n/a"}.`
-        : "Solid session completed. Keep building consistency and focus on clean movement quality.",
-      keyInsights: input.curlEvidence
-        ? [
-            input.curlEvidence.improvementTrend >= 0 ? "Curl quality improved or held steady across the set." : "Curl quality dropped across the set, likely from fatigue or rushing.",
-            input.curlEvidence.recurringFailedMetrics.length
-              ? `Most repeated issue: ${input.curlEvidence.recurringFailedMetrics[0]}.`
-              : "No repeated failed curl metric dominated the set.",
-            `Average tracking reliability was ${input.curlEvidence.reliabilityAverage}%.`,
-          ]
-        : ["You completed the session and built training consistency.", "Your next gains come from cleaner form under fatigue."],
-      nextSessionFocus: [
-        "Perform 2 slow warm-up sets before working reps.",
-        "Use a 2-second lowering phase on every rep.",
-        "Stop each set when form starts to break.",
-      ],
-      techniqueScorecard: {
-        elbowPath: 70,
-        rangeOfMotion: 72,
-        tempoControl: 68,
-        torsoStability: 74,
-      },
-      topMistakes: [
-        {
-          mistake: "Elbows drift forward during the concentric phase",
-          whyItHurtsPerformance: "Shifts tension away from the biceps and reduces consistent loading.",
-          exactFix: "Keep elbows pinned to your ribs; imagine pressing triceps lightly into your torso every rep.",
-        },
-        {
-          mistake: "Incomplete extension at the bottom",
-          whyItHurtsPerformance: "Cuts effective range and limits stimulus through full muscle length.",
-          exactFix: "Lower until arms are nearly straight, then pause 0.5s before curling up.",
-        },
-        {
-          mistake: "Torso sway to finish difficult reps",
-          whyItHurtsPerformance: "Uses momentum instead of muscular force, reducing quality and control.",
-          exactFix: "Reduce load by 10-20%, brace abs, and perform 3-second eccentrics.",
-        },
-      ],
-      correctivePlan5Min: [
-        { minuteRange: "0:00-1:30", drill: "Wall-supported strict curls (light weight)", focusCue: "Elbows fixed, no shoulder drift." },
-        { minuteRange: "1:30-3:30", drill: "Tempo curls (2 up, 3 down)", focusCue: "Own the lowering phase." },
-        { minuteRange: "3:30-5:00", drill: "Half-rep top squeeze holds", focusCue: "Peak contraction without swinging." },
-      ],
-    };
-  }
+  if (!clientInfo) return localSessionSummary(input);
 
   const completion = await clientInfo.client.chat.completions.create({
     model: clientInfo.model,
@@ -805,6 +702,7 @@ ${input.sessionSummary}`;
 
 export async function generateCoachFeedback(input: {
   profile: AppUserProfile | null;
+  signal?: AbortSignal;
   exerciseType: string;
   coachingLevel?: "easy" | "normal" | "hard";
   repsSoFar: number;
@@ -826,7 +724,7 @@ export async function generateCoachFeedback(input: {
   };
   recentCueHistory?: Array<{ message: string; severity: "critical" | "warning" | "info"; source: "rule_engine" | "llm_coach" | "system"; timestamp: number }>;
 }) {
-  const clientInfo = getClient();
+  const clientInfo = getClient(input.signal);
   const scoreSummary = input.recentScores
     .map((score, index) => `Rep ${index + 1}: form ${score.form}, rom ${score.rom}, tempo ${score.tempo}, safety ${score.safety}`)
     .join("\n");
@@ -929,11 +827,43 @@ ${profileContext(input.profile)}`,
     const priority = /stop|unsafe|pain|knee|back|neck/i.test(feedback) ? "safety" : input.currentIssues.length ? "form" : "motivation";
     return { feedback, priority, provider: clientInfo.provider, model: clientInfo.model };
   } catch (error) {
+    if (error instanceof ApiError || input.signal?.aborted) throw error;
     return {
       ...fallback,
       attemptedProvider: clientInfo.provider,
       attemptedModel: clientInfo.model,
-      error: sanitizeAiError(error),
+      error: "AI service temporarily unavailable",
     };
   }
+}
+
+export async function generateWorkoutPlan(profile: AppUserProfile | null, options: { signal?: AbortSignal } = {}) {
+  try { const generated = await generateWorkoutPlanWithProvider(profile, options.signal); validateWorkoutPlan(generated.plan,profile); return generated; }
+  catch (error) {
+    if (error instanceof ApiError || options.signal?.aborted) throw error;
+    const plan = buildFallbackWorkoutPlan(profile);
+    try { validateWorkoutPlan(plan, profile); } catch { throw new ApiError(422,"PLAN_NEEDS_REVIEW","A plan meeting your training constraints could not be created. Review your profile and try again."); }
+    return { plan, provider: "fallback" as const, model: "fallback" };
+  }
+}
+export async function generateNutritionPlan(profile: AppUserProfile | null, options: { signal?: AbortSignal } = {}) {
+  try {
+    const generated = await generateNutritionPlanWithProvider(profile, options.signal);
+    validateNutritionPlan(generated.plan, profile);
+    return generated;
+  } catch (error) {
+    if (error instanceof ApiError || options.signal?.aborted) throw error;
+    const plan = buildFallbackNutritionPlan(profile);
+    try { validateNutritionPlan(plan, profile); }
+    catch { throw new ApiError(422, "PLAN_NEEDS_REVIEW", "A plan meeting your dietary restrictions could not be created. Review your profile and try again."); }
+    return { plan, provider: "fallback" as const, model: "fallback" };
+  }
+}
+function localSessionSummary(input: { sessionSummary: string; curlEvidence?: { totalReps: number; averageScore: number; reliabilityAverage: number; recurringFailedMetrics: string[] } }) {
+  const evidence = input.curlEvidence;
+  return { summary: evidence ? `${evidence.totalReps} reps recorded; measured average score ${evidence.averageScore}/100. Tracking reliability ${evidence.reliabilityAverage}%.` : "Session recorded. Review measured scores and tracking limitations in your session report.", keyInsights: evidence?.recurringFailedMetrics.map(metric => `Recorded issue: ${metric}`) ?? [], nextSessionFocus: ["Use the camera setup guide and compare measured results in your next session."], techniqueScorecard: undefined, topMistakes: [], correctivePlan5Min: [], provider: "fallback" as const, model: "fallback" };
+}
+export async function generateSessionSummary(input: Parameters<typeof generateSessionSummaryWithProvider>[0]) {
+  try { return await generateSessionSummaryWithProvider(input); }
+  catch (error) { if (error instanceof ApiError || input.signal?.aborted) throw error; return localSessionSummary(input); }
 }

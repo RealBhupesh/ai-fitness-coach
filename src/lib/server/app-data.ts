@@ -592,9 +592,9 @@ export function buildFallbackWorkoutPlan(profile: AppUserProfile | null) {
 
 export function buildFallbackNutritionPlan(profile: AppUserProfile | null) {
   const weight = profile?.weightKg ?? 70;
-  const dailyCalories =
-    profile?.goals[0] === "muscle_gain" ? Math.round(weight * 33) : profile?.goals[0] === "fat_loss" ? Math.round(weight * 27) : Math.round(weight * 30);
-  const proteinGrams = Math.round(weight * 1.8);
+  const dailyCalories = Math.max(1400,Math.min(4200,
+    profile?.goals[0] === "muscle_gain" ? Math.round(weight * 33) : profile?.goals[0] === "fat_loss" ? Math.round(weight * 27) : Math.round(weight * 30)));
+  const proteinGrams = Math.min(320,Math.round(weight * 1.8));
   const fatGrams = Math.round((dailyCalories * 0.25) / 9);
   const carbsGrams = Math.round((dailyCalories - proteinGrams * 4 - fatGrams * 9) / 4);
   return {
@@ -604,7 +604,7 @@ export function buildFallbackNutritionPlan(profile: AppUserProfile | null) {
       {
         type: "breakfast",
         name: "Protein oats bowl",
-        ingredients: ["Oats", "Protein powder", "Fruit", "Seeds"],
+        ingredients: ["Rice", "Peas", "Fruit", "Seeds"],
         calories: Math.round(dailyCalories * 0.25),
         protein: Math.round(proteinGrams * 0.25),
         carbs: Math.round(carbsGrams * 0.3),
@@ -616,7 +616,7 @@ export function buildFallbackNutritionPlan(profile: AppUserProfile | null) {
       {
         type: "lunch",
         name: "Balanced power bowl",
-        ingredients: ["Lean protein", "Rice or roti", "Vegetables", "Yogurt or sauce"],
+        ingredients: ["Lentils", "Rice", "Vegetables", "Olive oil"],
         calories: Math.round(dailyCalories * 0.35),
         protein: Math.round(proteinGrams * 0.35),
         carbs: Math.round(carbsGrams * 0.35),
@@ -628,7 +628,7 @@ export function buildFallbackNutritionPlan(profile: AppUserProfile | null) {
       {
         type: "dinner",
         name: "Recovery dinner plate",
-        ingredients: ["Protein source", "Vegetables", "Complex carbs"],
+        ingredients: ["Beans", "Vegetables", "Potatoes"],
         calories: Math.round(dailyCalories * 0.3),
         protein: Math.round(proteinGrams * 0.3),
         carbs: Math.round(carbsGrams * 0.25),
@@ -640,7 +640,7 @@ export function buildFallbackNutritionPlan(profile: AppUserProfile | null) {
       {
         type: "snack",
         name: "Protein snack",
-        ingredients: ["Greek yogurt or tofu", "Fruit", "Nuts"],
+        ingredients: ["Peas", "Fruit", "Seeds"],
         calories: Math.round(dailyCalories * 0.1),
         protein: Math.round(proteinGrams * 0.1),
         carbs: Math.round(carbsGrams * 0.1),
@@ -651,12 +651,12 @@ export function buildFallbackNutritionPlan(profile: AppUserProfile | null) {
       },
     ],
     hydration: {
-      dailyLiters: Number(Math.max(2.2, weight * 0.035).toFixed(1)),
+      dailyLiters: Number(Math.min(6,Math.max(2.2, weight * 0.035)).toFixed(1)),
       reminders: ["Drink 500ml on waking", "Sip water before each meal", "Hydrate after training"],
     },
     groceryList: [
-      { item: "Lean protein", quantity: "1 week supply", estimatedCost: "variable" },
-      { item: "Whole grains", quantity: "1 week supply", estimatedCost: "variable" },
+      { item: "Lentils and beans", quantity: "1 week supply", estimatedCost: "variable" },
+      { item: "Rice", quantity: "1 week supply", estimatedCost: "variable" },
       { item: "Seasonal vegetables", quantity: "1 week supply", estimatedCost: "variable" },
       { item: "Fruit", quantity: "1 week supply", estimatedCost: "variable" },
     ],

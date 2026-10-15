@@ -10,6 +10,8 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: true,
+    maxWorkers: 2,
+    testTimeout: 15000,
     include: ["src/**/*.test.ts"],
   },
   resolve: {

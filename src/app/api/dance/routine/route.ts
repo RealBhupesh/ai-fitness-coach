@@ -1,3 +1,4 @@
+import { apiError } from "@/lib/server/api";
 import { NextResponse } from "next/server";
 import { getDanceRoutineDemo } from "@/lib/server/app-data";
 import { requireServerSession } from "@/lib/auth/session";
@@ -14,7 +15,7 @@ export async function GET(request: Request) {
       const routine = await getDanceRoutineDemo();
       return NextResponse.json({ routine, source: "db" });
     }
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return apiError(error, request);
   }
 }

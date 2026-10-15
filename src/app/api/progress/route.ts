@@ -1,3 +1,4 @@
+import { apiError, readJson } from "@/lib/server/api";
 import { desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { NextResponse } from "next/server";
@@ -54,17 +55,17 @@ export async function GET(request: Request) {
       totalSessions: workouts.length,
       avgScore,
     });
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return apiError(error, request);
   }
 }
 
 export async function POST(request: Request) {
   try {
     const session = await requireServerSession(request);
-    const guard = guardMutationRequest(request, {
+    const guard = await guardMutationRequest(request, {
       bucket: "progress",
-      key: `${session.user.id}:${getRequestIp(request)}`,
+      key: session.user.id,
       limit: 20,
       windowMs: 60_000,
     });
@@ -72,7 +73,7 @@ export async function POST(request: Request) {
       return guard;
     }
 
-    const parsed = progressInputSchema.safeParse(await request.json());
+    const parsed = progressInputSchema.safeParse(await readJson(request));
     if (!parsed.success) {
       return NextResponse.json({ error: "Invalid progress payload", details: parsed.error.flatten() }, { status: 400 });
     }
@@ -98,7 +99,6 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ message: "Progress saved successfully" });
   } catch (error) {
-    const status = error instanceof Error && error.message === "UNAUTHORIZED" ? 401 : 500;
-    return NextResponse.json({ error: status === 401 ? "Unauthorized" : "Failed to save progress" }, { status });
+    return apiError(error, request);
   }
 }

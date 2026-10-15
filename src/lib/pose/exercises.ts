@@ -203,14 +203,14 @@ const LM = (landmarks: Landmark[], index: number) => landmarks[index];
 const vis = (landmark?: Landmark | null) => landmark?.visibility ?? 0;
 
 function resolveLandmarks(input: Landmark[] | TrackingFrame) {
-  return Array.isArray(input) ? input : input.smoothedLandmarks;
+  return Array.isArray(input) ? input : input.analysisLandmarks ?? input.smoothedLandmarks;
 }
 
 function resolveReliability(input: Landmark[] | TrackingFrame, key: string, indices: number[], options?: { minAverage?: number; minPoint?: number }) {
   if (!Array.isArray(input) && key in input.reliability) {
     return input.reliability[key];
   }
-  return isMetricReliable(resolveLandmarks(input), indices, options);
+  return isMetricReliable(Array.isArray(input) ? input : input.smoothedLandmarks, indices, options);
 }
 
 const REP_CYCLE_BY_EXERCISE: Partial<Record<ExerciseId, PhaseCycleConfig>> = {
@@ -651,8 +651,8 @@ function analyzeBicepCurl(input: Landmark[] | TrackingFrame, phaseOverride?: str
       Number(wristFold.toFixed(1)),
       "0-26 fold",
       {
-        reliable: armReliable,
-        unreliableDetail: "Wrist stack is not reliable to coach until the forearm and wrist are fully visible.",
+        reliable: false,
+        unreliableDetail: "Hand orientation is not measured by this pose-only scorecard.",
       },
     ),
     metric(

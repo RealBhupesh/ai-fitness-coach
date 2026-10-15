@@ -22,8 +22,9 @@ services:
       db:
         condition: service_healthy
     environment:
-      NODE_ENV: production
+      NODE_ENV: development
       DATABASE_URL: postgres://postgres:postgres@db:5432/fitcoach
+      DATABASE_SSL: "false"
       BETTER_AUTH_SECRET: replace-with-a-long-random-secret-at-least-32-chars
       BETTER_AUTH_URL: http://localhost:3000
       NEXT_PUBLIC_APP_URL: http://localhost:3000

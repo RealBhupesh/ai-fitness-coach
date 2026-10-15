@@ -1,3 +1,4 @@
+import { apiError, readJson } from "@/lib/server/api";
 import { NextResponse } from "next/server";
 import { nanoid } from "nanoid";
 import { desc, eq } from "drizzle-orm";
@@ -59,17 +60,16 @@ export async function GET(request: Request) {
       .find(Boolean);
     return NextResponse.json({ recoveryCheckIn: latest ?? null });
   } catch (error) {
-    const status = error instanceof Error && error.message === "UNAUTHORIZED" ? 401 : 500;
-    return NextResponse.json({ error: status === 401 ? "Unauthorized" : "Failed to load recovery check-in" }, { status });
+    return apiError(error, request);
   }
 }
 
 export async function POST(request: Request) {
   try {
     const session = await requireServerSession(request);
-    const guard = guardMutationRequest(request, {
+    const guard = await guardMutationRequest(request, {
       bucket: "recovery-checkin",
-      key: `${session.user.id}:${getRequestIp(request)}`,
+      key: session.user.id,
       limit: 20,
       windowMs: 60_000,
     });
@@ -77,8 +77,8 @@ export async function POST(request: Request) {
       return guard;
     }
 
-    const body = await request.json().catch(() => ({}));
-    const payload = recoveryPayload(body && typeof body === "object" ? body : {});
+    const body = await readJson(request);
+    const payload = recoveryPayload(body && typeof body === "object" ? body as Record<string, unknown> : {});
 
     if (isDemoUser(session.user.id) || !isDatabaseConfigured) {
       return NextResponse.json(payload);
@@ -94,7 +94,6 @@ export async function POST(request: Request) {
 
     return NextResponse.json(payload);
   } catch (error) {
-    const status = error instanceof Error && error.message === "UNAUTHORIZED" ? 401 : 500;
-    return NextResponse.json({ error: status === 401 ? "Unauthorized" : "Failed to save recovery check-in" }, { status });
+    return apiError(error, request);
   }
 }

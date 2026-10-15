@@ -1,3 +1,4 @@
+import { apiError, readJson } from "@/lib/server/api";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireServerSession } from "@/lib/auth/session";
@@ -31,23 +32,22 @@ export async function GET(request: Request) {
     const course = await getDanceCourseState(session.user.id, routine, { demo: isDemoUser(session.user.id) });
     return NextResponse.json({ routine, course });
   } catch (error) {
-    const status = error instanceof Error && error.message === "UNAUTHORIZED" ? 401 : 500;
-    return NextResponse.json({ error: status === 401 ? "Unauthorized" : "Failed to load dance course" }, { status });
+    return apiError(error, request);
   }
 }
 
 export async function POST(request: Request) {
   try {
     const session = await requireServerSession(request);
-    const guard = guardMutationRequest(request, {
+    const guard = await guardMutationRequest(request, {
       bucket: "dance-course",
-      key: `${session.user.id}:${getRequestIp(request)}`,
+      key: session.user.id,
       limit: 30,
       windowMs: 60_000,
     });
     if (guard) return guard;
 
-    const parsed = attemptSchema.safeParse(await request.json());
+    const parsed = attemptSchema.safeParse(await readJson(request));
     if (!parsed.success) {
       return NextResponse.json({ error: "Invalid dance attempt payload", details: parsed.error.flatten() }, { status: 400 });
     }
@@ -62,7 +62,6 @@ export async function POST(request: Request) {
     const course = await getDanceCourseState(session.user.id, routine);
     return NextResponse.json({ message: "Dance attempt recorded", result, course });
   } catch (error) {
-    const status = error instanceof Error && error.message === "UNAUTHORIZED" ? 401 : 500;
-    return NextResponse.json({ error: status === 401 ? "Unauthorized" : "Failed to record dance attempt" }, { status });
+    return apiError(error, request);
   }
 }

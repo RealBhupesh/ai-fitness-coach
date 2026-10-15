@@ -1,5 +1,7 @@
 import { db } from "./index";
 import { achievements, danceRoutines, danceStyles, exercises } from "./schema";
+import { eq } from "drizzle-orm";
+import { dbPool } from "./index";
 import { nanoid } from "nanoid";
 
 // Seed data for exercises
@@ -497,34 +499,38 @@ export async function seedDatabase() {
     // Seed exercises
     console.log("📝 Seeding exercises...");
     for (const exercise of exercisesData) {
-      await db.insert(exercises).values(exercise).onConflictDoNothing();
+      if (!await db.query.exercises.findFirst({ where: eq(exercises.name, exercise.name) })) await db.insert(exercises).values(exercise).onConflictDoNothing();
     }
     console.log(`✅ Seeded ${exercisesData.length} exercises`);
 
+    for (const [id,name,category] of [["bicep_curl","Bicep Curl","strength"],["warrior","Warrior","yoga"],["dance_basic","Dance Frame","dance"]]) {
+      if (!await db.query.exercises.findFirst({ where: eq(exercises.name,name) })) await db.insert(exercises).values({ id, name, category, difficulty:"beginner", description:"Guided movement with camera quality checks", instructions:JSON.stringify(["Follow the camera setup guide", "Calibrate before starting", "Use comfortable controlled movement"]), isActive:true }).onConflictDoNothing();
+    }
     // Seed dance styles
     console.log("💃 Seeding dance styles...");
     for (const style of danceStylesData) {
-      await db.insert(danceStyles).values(style).onConflictDoNothing();
+      if (!await db.query.danceStyles.findFirst({ where: eq(danceStyles.name, style.name) })) await db.insert(danceStyles).values(style).onConflictDoNothing();
     }
     console.log(`✅ Seeded ${danceStylesData.length} dance styles`);
 
     // Seed achievements
     console.log("🏆 Seeding achievements...");
     for (const achievement of achievementsData) {
-      await db.insert(achievements).values(achievement).onConflictDoNothing();
+      if (!await db.query.achievements.findFirst({ where: eq(achievements.name, achievement.name) })) await db.insert(achievements).values(achievement).onConflictDoNothing();
     }
     console.log(`✅ Seeded ${achievementsData.length} achievements`);
 
     // Seed dance routines
     console.log("🎵 Seeding dance routines...");
     for (const routine of danceRoutineData) {
-      await db.insert(danceRoutines).values(routine).onConflictDoNothing();
+      const style = await db.query.danceStyles.findFirst({ where: eq(danceStyles.name, "Hip-Hop Dance") });
+      if (style && !await db.query.danceRoutines.findFirst({ where: eq(danceRoutines.name, routine.name) })) await db.insert(danceRoutines).values({ ...routine, danceStyleId: style.id }).onConflictDoNothing();
     }
     console.log(`✅ Seeded ${danceRoutineData.length} dance routines`);
 
     console.log("✨ Database seed completed successfully!");
   } catch (error) {
-    console.error("❌ Error seeding database:", error);
+    console.error("Database seed failed", { code: (error as any)?.cause?.code, table: (error as any)?.cause?.table, column: (error as any)?.cause?.column });
     throw error;
   }
 }
@@ -532,6 +538,6 @@ export async function seedDatabase() {
 // Run seed if this file is executed directly
 if (require.main === module) {
   seedDatabase()
-    .then(() => process.exit(0))
+    .then(async () => { await dbPool?.end(); process.exit(0); })
     .catch(() => process.exit(1));
 }

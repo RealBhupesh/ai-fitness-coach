@@ -1,4 +1,6 @@
 "use client";
+import { clearUserDeviceData } from "@/lib/coach/pending-sessions";
+import { displayMeasurement, canonicalMeasurement } from "@/lib/units";
 
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
@@ -58,7 +60,7 @@ const dietOptions: { value: DietaryPref; label: string }[] = [
 ];
 
 export default function SettingsPage() {
-  const { profile, updateProfile, resetProfile } = useUserProfile();
+  const { profile, session, updateProfile, resetProfile } = useUserProfile();
 
   // Profile fields
   const [name, setName] = useState(profile?.name ?? "");
@@ -126,7 +128,48 @@ export default function SettingsPage() {
     );
   };
 
+  const savePreferences = async (nextUnits: "metric" | "imperial", nextTheme: "light" | "dark" | "system") => {
+    try {
+      const response = await fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ units: nextUnits, theme: nextTheme }) });
+      if (!response.ok) throw new Error();
+      toast.success("Preferences saved");
+    } catch { toast.error("Preferences could not be saved. Please retry."); }
+  };
+  useEffect(() => {
+    if (!profile?.userId) return;
+    void fetch("/api/settings").then(async r => { if (!r.ok) throw new Error(); return r.json(); }).then(data => {
+      setUnits(data.settings.units);
+      setTheme(data.settings.theme);
+      document.documentElement.classList.toggle("dark", data.settings.theme === "dark" || (data.settings.theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches));
+    }).catch(() => toast.error("Saved preferences could not be loaded"));
+  }, [profile?.userId]);
+  const exportData = async () => {
+    try {
+      const response = await fetch("/api/account/export");
+      if (!response.ok) throw new Error();
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a"); link.href = url; link.download = "fitcoach-data.json"; link.click(); URL.revokeObjectURL(url);
+    } catch { toast.error("Data export unavailable. Please retry."); }
+  };
+  const deleteAccount = async () => {
+    if (window.prompt("This deletes your account and saved activity. Type DELETE to confirm.") !== "DELETE") return;
+    try {
+      const response = await fetch("/api/account", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmation: "DELETE" }) });
+      if (!response.ok) throw new Error();
+      const userId = session?.user?.id ?? profile?.userId;
+      if (userId) clearUserDeviceData(localStorage, userId);
+      window.location.assign("/sign-out");
+    } catch { toast.error("Account deletion unavailable. Please retry."); }
+  };
+  const linkAccount = async () => {
+    const response = await fetch("/api/account/link", { method: "POST" });
+    const data = await response.json();
+    if (response.ok) { toast.success("Accounts linked"); window.location.reload(); }
+    else toast.error(data.error || "Account linking failed");
+  };
+
   const handleSaveProfile = async () => {
+    try {
     await updateProfile({
       name: name.trim(),
       age: age ? Number(age) : undefined,
@@ -145,19 +188,21 @@ export default function SettingsPage() {
       allergies: allergies || undefined,
     });
     toast.success("Profile saved successfully!");
+    } catch { toast.error("Profile could not be saved. Please retry."); }
   };
 
   const handleResetProfile = () => {
-    if (confirm("Are you sure you want to reset all your data? This cannot be undone.")) {
+    if (confirm("Are you sure you want to reset your profile? Workout history will be kept. This cannot be undone.")) {
       void resetProfile().then(() => {
         toast.success("Profile reset successfully");
         window.location.reload();
-      });
+      }).catch(() => toast.error("Profile could not be reset"));
     }
   };
 
   const handleThemeChange = (newTheme: "light" | "dark" | "system") => {
     setTheme(newTheme);
+    void savePreferences(units, newTheme);
     if (newTheme === "system") {
       const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
       document.documentElement.classList.toggle("dark", prefersDark);
@@ -299,8 +344,8 @@ export default function SettingsPage() {
                     <Input
                       id="height"
                       type="number"
-                      value={heightCm}
-                      onChange={(e) => setHeightCm(e.target.value)}
+                      value={displayMeasurement(heightCm, units, "height")}
+                      onChange={(e) => setHeightCm(canonicalMeasurement(e.target.value, units, "height"))}
                       placeholder="175"
                     />
                   </div>
@@ -309,14 +354,14 @@ export default function SettingsPage() {
                     <Input
                       id="weight"
                       type="number"
-                      value={weightKg}
-                      onChange={(e) => setWeightKg(e.target.value)}
+                      value={displayMeasurement(weightKg, units, "weight")}
+                      onChange={(e) => setWeightKg(canonicalMeasurement(e.target.value, units, "weight"))}
                       placeholder="70"
                     />
                   </div>
                   <div className="space-y-2">
                     <Label>Unit System</Label>
-                    <Select value={units} onValueChange={(v: "metric" | "imperial") => setUnits(v)}>
+                    <Select value={units} onValueChange={(v: "metric" | "imperial") => { setUnits(v); void savePreferences(v, theme); }}>
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
@@ -519,7 +564,7 @@ export default function SettingsPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Push Notifications</CardTitle>
-                <CardDescription>Configure your notification preferences</CardDescription>
+                <CardDescription>Reminder delivery is not available in this beta.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 {[
@@ -532,7 +577,7 @@ export default function SettingsPage() {
                       <div className="font-medium">{item.label}</div>
                       <div className="text-sm text-muted-foreground">{item.description}</div>
                     </div>
-                    <Switch checked={item.state} onCheckedChange={item.setState} />
+                    <Switch disabled checked={item.state} onCheckedChange={item.setState} />
                   </div>
                 ))}
               </CardContent>
@@ -554,7 +599,7 @@ export default function SettingsPage() {
                     <div className="font-medium">Email Updates</div>
                     <div className="text-sm text-muted-foreground">Receive tips and updates via email</div>
                   </div>
-                  <Switch checked={emailNotifications} onCheckedChange={setEmailNotifications} />
+                  <Switch disabled checked={emailNotifications} onCheckedChange={setEmailNotifications} />
                 </div>
               </CardContent>
             </Card>
@@ -605,6 +650,7 @@ export default function SettingsPage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
           >
+            <Card className="mb-6"><CardHeader><CardTitle>Your account data</CardTitle><CardDescription>Export your saved activity or permanently delete your account.</CardDescription></CardHeader><CardContent className="flex flex-wrap gap-3"><Button onClick={() => void exportData()}>Export data</Button><Button variant="destructive" onClick={() => void deleteAccount()}>Delete account</Button>{process.env.NEXT_PUBLIC_ENABLE_LEGACY_AUTH === "true" && <Button variant="outline" onClick={() => void linkAccount().catch(() => toast.error("Account linking unavailable"))}>Link existing account</Button>}</CardContent></Card>
             <Card className="border-destructive/50">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-destructive">
@@ -615,9 +661,9 @@ export default function SettingsPage() {
               <CardContent className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <div className="font-medium">Reset All Data</div>
+                    <div className="font-medium">Reset Profile</div>
                     <div className="text-sm text-muted-foreground">
-                      This will delete all your profile data, workout history, and preferences.
+                      Reset profile details. Workout history and account preferences are kept.
                     </div>
                   </div>
                   <Button variant="destructive" size="sm" onClick={handleResetProfile} className="gap-2">

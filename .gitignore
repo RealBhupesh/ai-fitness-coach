@@ -42,3 +42,20 @@ next-env.d.ts
 
 # local env secrets
 .env.local
+
+# Credentials and private validation artifacts
+.env*
+!.env.example
+/backups/
+/datasets/
+/reports/
+/playwright-report/
+/test-results/
+__pycache__/
+*.pyc
+
+# Generated classic worker; emitted before dev/build/browser tests
+/public/mediapipe/pose-worker.js
+
+# Private local validation logs
+/.*-validation.log

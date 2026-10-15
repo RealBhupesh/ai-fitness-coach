@@ -49,6 +49,7 @@ const squatScorecard = {
 describe("live curl evidence schemas", () => {
   it("accepts curl scorecards in workout rep data", () => {
     const parsed = workoutSessionInputSchema.safeParse({
+      clientSessionId: "4f9f3ec1-0171-44b8-8c86-2ac3b5016c5a",
       type: "strength",
       exerciseType: "bicep_curl",
       repData: [
@@ -98,6 +99,7 @@ describe("live curl evidence schemas", () => {
 
   it("accepts squat scorecards in workout rep data", () => {
     const parsed = workoutSessionInputSchema.safeParse({
+      clientSessionId: "4f9f3ec1-0171-44b8-8c86-2ac3b5016c5a",
       type: "strength",
       exerciseType: "squat",
       repData: [
@@ -121,6 +123,7 @@ describe("live curl evidence schemas", () => {
 
   it("accepts dance segment evidence in workout session payloads", () => {
     const parsed = workoutSessionInputSchema.safeParse({
+      clientSessionId: "4f9f3ec1-0171-44b8-8c86-2ac3b5016c5a",
       type: "dance",
       exerciseType: "dance_basic",
       compositeScore: 84,
